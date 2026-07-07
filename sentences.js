@@ -1,0 +1,51 @@
+// 연습 문장 은행 — 카테고리별
+const SENTENCES = {
+  daily: [
+    { text: "Could you tell me how to get to the nearest subway station?" },
+    { text: "I've been meaning to try that new restaurant downtown." },
+    { text: "Sorry, I didn't quite catch that. Could you say it again?" },
+    { text: "It took me a while to get used to the weather here." },
+    { text: "Would you mind if I opened the window a little?" },
+    { text: "I'm not sure yet, but I'll let you know by tomorrow." },
+    { text: "That sounds great. Let's grab a coffee sometime this week." },
+    { text: "I usually go for a walk after dinner to clear my head." },
+    { text: "Honestly, I think it's worth the price considering the quality." },
+    { text: "We ended up staying much longer than we had planned." },
+    { text: "Could you give me a hand with this? It's heavier than it looks." },
+    { text: "I'd rather stay in tonight and catch up on some reading." },
+  ],
+  medical: [
+    { text: "The patient's hemoglobin level has dropped significantly since admission." },
+    { text: "We need to rule out contamination before reporting this blood culture result." },
+    { text: "The delta check flagged this potassium value as potentially spurious." },
+    { text: "Thank you for the opportunity to present our findings today." },
+    { text: "Our data suggest that the new assay improves diagnostic accuracy." },
+    { text: "Could you elaborate on how you validated the reference intervals?" },
+    { text: "The specimen was hemolyzed, so we requested a redraw." },
+    { text: "This figure shows the correlation between the two measurement methods." },
+    { text: "In conclusion, early detection remains the key to better outcomes." },
+    { text: "I'd be happy to take any questions from the audience." },
+  ],
+  drill: [
+    { text: "I think this thing is thicker than that one.", tip: "th /θ/ — 혀끝을 이 사이에" },
+    { text: "My mother and father gathered together on their birthday.", tip: "th /ð/ — 유성음 th" },
+    { text: "The red lorry carried yellow jelly along the road.", tip: "r/l 구분" },
+    { text: "I really love the rice, but I'd rather have the lice removed.", tip: "r/l 최소대립쌍" },
+    { text: "Everybody believes the vivid video was very valuable.", tip: "v /v/ — 아랫입술을 살짝 물기" },
+    { text: "Five brave friends viewed the beautiful violet flowers.", tip: "f/v vs b/p 구분" },
+    { text: "We were wondering whether the weather would get worse.", tip: "w /w/ — 입술 둥글게" },
+    { text: "She sells seashells by the seashore.", tip: "s/ʃ 구분" },
+    { text: "The zoo's busy bees seized the frozen cheese.", tip: "z /z/ — 유성음 s" },
+    { text: "Would you pull the full bowl of wool from the pool?", tip: "u/ʊ 모음 구분" },
+    { text: "A big ship is leaving, but the sheep keep sleeping.", tip: "i/ɪ 모음 구분 (ship/sheep)" },
+    { text: "The judge urged the gentle giant to change gradually.", tip: "dʒ 발음" },
+  ],
+};
+
+const CATEGORY_LABELS = {
+  daily: "일상 회화",
+  medical: "진료·학술",
+  drill: "발음 집중훈련",
+  review: "오답 복습",
+  custom: "직접 입력",
+};

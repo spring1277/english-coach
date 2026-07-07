@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>English Coach — 발음 트레이너</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <h1>🎙️ English Coach <span class="sub">발음 트레이너</span></h1>
+  <button id="btnSettings" class="icon-btn" title="설정">⚙️</button>
+</header>
+
+<div id="keyBanner" class="banner hidden">
+  ⚠️ Azure Speech 키가 설정되지 않았습니다. <button id="bannerOpen" class="link-btn">지금 설정하기</button>
+</div>
+
+<main>
+<nav class="mode-nav">
+  <button id="modePron" class="mode-btn active">🔤 발음 연습</button>
+  <button id="modeConv" class="mode-btn">💬 회화 수업</button>
+  <button id="modeDash" class="mode-btn">📊 통계</button>
+</nav>
+
+<div id="viewPron" class="view">
+  <!-- 문장 선택 -->
+  <section class="card">
+    <nav class="tabs" id="tabs"></nav>
+    <div id="customBox" class="custom-box hidden">
+      <textarea id="customText" rows="2" placeholder="연습할 영어 문장을 직접 입력하세요"></textarea>
+      <button id="customApply" class="btn small">적용</button>
+    </div>
+    <p id="sentence" class="sentence"></p>
+    <p id="tip" class="tip hidden"></p>
+    <div id="answerRow" class="answer-row hidden">
+      <button id="btnShowAnswer" class="btn ghost small">✅ 정답 확인</button>
+      <p id="answerText" class="answer hidden"></p>
+    </div>
+    <div class="row">
+      <button id="btnListen" class="btn ghost">🔊 원어민 듣기</button>
+      <button id="btnNext" class="btn ghost">다음 문장 →</button>
+    </div>
+  </section>
+
+  <!-- 녹음 -->
+  <section class="card center">
+    <button id="btnRec" class="rec-btn" title="녹음 시작/정지">🎤</button>
+    <div class="rec-meta">
+      <span id="recStatus">버튼을 누르고 문장을 읽어보세요</span>
+      <span id="recTimer" class="timer hidden">0.0s</span>
+    </div>
+    <div class="level-wrap"><div id="level" class="level-bar"></div></div>
+  </section>
+
+  <!-- 결과 -->
+  <section id="result" class="card hidden">
+    <div class="scores" id="scores"></div>
+    <div id="wordsBox" class="words"></div>
+    <div id="phonemePanel" class="phoneme-panel hidden"></div>
+    <p id="recognized" class="recognized"></p>
+    <div class="row">
+      <button id="btnPlayback" class="btn ghost">▶ 내 녹음 듣기</button>
+      <button id="btnRetry" class="btn">🔁 다시 시도</button>
+    </div>
+    <p class="legend">
+      <span class="lg good">80+ 좋음</span>
+      <span class="lg mid">60–79 보통</span>
+      <span class="lg bad">&lt;60 교정 필요</span>
+      <span class="lg omit">누락</span>
+      <span class="lg insert">삽입</span>
+    </p>
+  </section>
+
+  <!-- 취약 음소 -->
+  <section class="card">
+    <h2>📉 취약 음소 <span class="sub">(누적 통계)</span></h2>
+    <div id="weakPhonemes" class="weak-box">아직 데이터가 없습니다. 문장을 채점하면 쌓입니다.</div>
+  </section>
+
+  <!-- 오답 은행 -->
+  <section class="card">
+    <h2>🗂 오답 은행 <span class="sub">(회화 수업에서 교정받은 문장)</span></h2>
+    <div id="wrongBank" class="bank">아직 없습니다. 💬 회화 수업 후 리포트를 만들면 자동으로 쌓입니다.</div>
+  </section>
+
+  <!-- 기록 -->
+  <section class="card">
+    <h2>🗓️ 최근 기록</h2>
+    <div id="history" class="history">아직 기록이 없습니다.</div>
+  </section>
+</div><!-- /viewPron -->
+
+<div id="viewConv" class="view hidden">
+  <section class="card">
+    <h2>💬 회화 수업 <span class="sub">Emma 선생님과 실시간 음성 대화</span></h2>
+    <div class="topics" id="topics"></div>
+    <div class="conv-controls">
+      <button id="btnConnect" class="btn big">🎧 수업 시작</button>
+      <span id="convStatus" class="conv-status">대기 중</span>
+      <span id="convTimer" class="conv-timer hidden">00:00</span>
+    </div>
+  </section>
+
+  <section class="card">
+    <div id="transcript" class="transcript">
+      <p class="placeholder">수업을 시작하면 대화 자막이 여기에 표시됩니다.<br>
+      헤드폰 사용을 권장합니다 (스피커 소리가 마이크로 다시 들어가는 것 방지).</p>
+    </div>
+    <div class="row">
+      <button id="btnEndReport" class="btn ghost" disabled>📋 수업 종료 &amp; 오늘의 리포트</button>
+    </div>
+  </section>
+
+  <section id="reportCard" class="card hidden">
+    <h2>📋 오늘의 교정 리포트</h2>
+    <div id="reportBody" class="report"></div>
+  </section>
+</div><!-- /viewConv -->
+
+<div id="viewDash" class="view hidden">
+  <section class="card">
+    <h2>📊 학습 통계</h2>
+    <div id="dashTiles" class="dash-tiles"></div>
+  </section>
+
+  <section class="card">
+    <h2>📈 최근 14일 발음 점수 <span class="sub">(일평균)</span></h2>
+    <div id="dashChart" class="dash-chart"></div>
+  </section>
+
+  <section class="card">
+    <h2>🔡 취약 음소 순위 <span class="sub">(평균 정확도, 2회 이상 채점)</span></h2>
+    <div id="dashPhonemes" class="dash-phonemes"></div>
+  </section>
+
+  <section class="card">
+    <h2>🗂 오답 은행 진행률</h2>
+    <div id="dashBank" class="dash-bank"></div>
+  </section>
+
+  <section class="card">
+    <h2>💬 최근 수업</h2>
+    <div id="dashSessions" class="history"></div>
+  </section>
+</div><!-- /viewDash -->
+</main>
+
+<!-- 설정 모달 -->
+<div id="modal" class="modal hidden">
+  <div class="modal-body">
+    <h2>⚙️ Azure Speech 설정</h2>
+    <p class="hint">
+      Azure Portal → 리소스 만들기 → <b>Speech</b> → 가격 책정 계층 <b>Free (F0)</b>로 생성 후
+      키를 복사해 붙여넣으세요. (월 5시간 무료, 카드 등록 불필요)
+    </p>
+    <label>Azure Speech 키 <span class="sub">— 🔤 발음 연습용</span>
+      <input type="password" id="cfgKey" placeholder="Azure Speech 키">
+    </label>
+    <label>Gemini API 키 <span class="sub">— 💬 회화 수업용</span>
+      <input type="password" id="cfgGemini" placeholder="AIzaSy...">
+    </label>
+    <p class="hint">회화 수업에는 Google Gemini 키가 필요합니다.
+      <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>
+      에서 무료 발급 (Google 계정만 있으면 됨, 무료 티어로 충분).</p>
+    <label>리전
+      <select id="cfgRegion">
+        <option value="koreacentral">koreacentral (한국 중부)</option>
+        <option value="eastasia">eastasia (홍콩)</option>
+        <option value="japaneast">japaneast (일본 동부)</option>
+        <option value="southeastasia">southeastasia (싱가포르)</option>
+        <option value="eastus">eastus (미국 동부)</option>
+        <option value="westus2">westus2 (미국 서부2)</option>
+        <option value="westeurope">westeurope (서유럽)</option>
+      </select>
+    </label>
+    <p id="cfgStatus" class="cfg-status"></p>
+    <div class="row">
+      <button id="cfgTest" class="btn ghost">연결 테스트</button>
+      <button id="cfgSave" class="btn">저장</button>
+      <button id="cfgClose" class="btn ghost">닫기</button>
+    </div>
+  </div>
+</div>
+
+<script src="sentences.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
