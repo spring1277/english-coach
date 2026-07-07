@@ -4,7 +4,12 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>English Coach — 발음 트레이너</title>
+<meta name="theme-color" content="#0f1420">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
 <link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/microsoft-cognitiveservices-speech-sdk@latest/distrib/browser/microsoft.cognitiveservices.speech.sdk.bundle-min.js"></script>
 </head>
 <body>
 <header>
@@ -149,21 +154,24 @@
 <!-- 설정 모달 -->
 <div id="modal" class="modal hidden">
   <div class="modal-body">
-    <h2>⚙️ Azure Speech 설정</h2>
+    <h2>⚙️ API 키 설정</h2>
     <p class="hint">
-      Azure Portal → 리소스 만들기 → <b>Speech</b> → 가격 책정 계층 <b>Free (F0)</b>로 생성 후
-      키를 복사해 붙여넣으세요. (월 5시간 무료, 카드 등록 불필요)
+      키는 이 기기(브라우저)에만 저장됩니다. 폰에서는 폰에서 한 번 입력하면 됩니다.
     </p>
     <label>Azure Speech 키 <span class="sub">— 🔤 발음 연습용</span>
       <input type="password" id="cfgKey" placeholder="Azure Speech 키">
     </label>
+    <p class="hint">
+      <a href="https://portal.azure.com" target="_blank" rel="noopener">portal.azure.com</a> →
+      만들어둔 Speech 리소스 → <b>키 및 엔드포인트</b>에서 키 1 복사.
+    </p>
     <label>Gemini API 키 <span class="sub">— 💬 회화 수업용</span>
       <input type="password" id="cfgGemini" placeholder="AIzaSy...">
     </label>
-    <p class="hint">회화 수업에는 Google Gemini 키가 필요합니다.
+    <p class="hint">
       <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>
-      에서 무료 발급 (Google 계정만 있으면 됨, 무료 티어로 충분).</p>
-    <label>리전
+      에서 무료 발급.</p>
+    <label>Azure 리전
       <select id="cfgRegion">
         <option value="koreacentral">koreacentral (한국 중부)</option>
         <option value="eastasia">eastasia (홍콩)</option>
@@ -185,5 +193,11 @@
 
 <script src="sentences.js"></script>
 <script src="app.js"></script>
+<script>
+  // PWA 서비스워커 (https에서만 — 로컬 개발 시 캐시 꼬임 방지)
+  if ("serviceWorker" in navigator && location.protocol === "https:") {
+    navigator.serviceWorker.register("sw.js");
+  }
+</script>
 </body>
 </html>

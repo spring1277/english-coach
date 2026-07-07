@@ -1,4 +1,7 @@
-/* English Coach — 발음 트레이너 프런트엔드 */
+/* English Coach — 발음 트레이너 + 회화 수업 (완전 정적 PWA)
+   발음 채점: Azure Speech JS SDK (브라우저 직접 연결)
+   회화 수업: Gemini Live API (브라우저 WebSocket 직접 연결)
+   키 저장: localStorage (기기별) — 로컬 서버가 있으면 최초 1회 이관 */
 const $ = (s) => document.querySelector(s);
 
 const state = {
@@ -8,6 +11,8 @@ const state = {
   recording: false,
   lastBlobUrl: null,
   ttsAudio: null,
+  azureKey: "",
+  region: "koreacentral",
   geminiKey: "",
 };
 
@@ -153,6 +158,7 @@ function renderBank() {
       $("#customBox").classList.add("hidden");
       renderTabs();
       renderSentence();
+      switchMode("pron");
       window.scrollTo({ top: 0, behavior: "smooth" });
     };
     item.querySelector(".b-del").onclick = () => {
@@ -214,30 +220,127 @@ function renderTabs() {
   }
 }
 
-/* ---------- 원어민 듣기 (edge-tts → 브라우저 TTS 폴백) ---------- */
+/* ---------- 원어민 듣기 (로컬서버 edge-tts → Azure TTS → 브라우저 TTS) ---------- */
+function escapeXml(s) {
+  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&apos;");
+}
+
+function sdkSpeak(text) {
+  return new Promise((resolve, reject) => {
+    if (!state.azureKey || typeof SpeechSDK === "undefined") return reject(new Error("no sdk"));
+    const sc = SpeechSDK.SpeechConfig.fromSubscription(state.azureKey, state.region);
+    const synth = new SpeechSDK.SpeechSynthesizer(sc);
+    const ssml = `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="en-US">` +
+      `<voice name="en-US-JennyNeural"><prosody rate="-10%">${escapeXml(text)}</prosody></voice></speak>`;
+    synth.speakSsmlAsync(
+      ssml,
+      (r) => {
+        synth.close();
+        if (r.reason === SpeechSDK.ResultReason.SynthesizingAudioCompleted) resolve();
+        else reject(new Error(r.errorDetails || "tts failed"));
+      },
+      (e) => { synth.close(); reject(new Error(String(e))); }
+    );
+  });
+}
+
 async function playModel() {
   const text = currentSentence().text;
   if (!text) return;
   $("#btnListen").disabled = true;
   try {
+    // 1) 로컬 서버 edge-tts (PC에서만 성공)
     const res = await fetch("/api/tts?text=" + encodeURIComponent(text));
-    if (res.ok) {
-      const blob = await res.blob();
-      if (state.ttsAudio) state.ttsAudio.pause();
-      state.ttsAudio = new Audio(URL.createObjectURL(blob));
-      await state.ttsAudio.play();
-    } else {
-      throw new Error("no server tts");
-    }
+    if (!res.ok || !(res.headers.get("content-type") || "").includes("audio")) throw new Error("no server tts");
+    const blob = await res.blob();
+    if (state.ttsAudio) state.ttsAudio.pause();
+    state.ttsAudio = new Audio(URL.createObjectURL(blob));
+    await state.ttsAudio.play();
   } catch {
-    const u = new SpeechSynthesisUtterance(text);
-    u.lang = "en-US";
-    u.rate = 0.9;
-    speechSynthesis.cancel();
-    speechSynthesis.speak(u);
+    try {
+      // 2) Azure TTS (같은 키, 무료 티어)
+      await sdkSpeak(text);
+    } catch {
+      // 3) 브라우저 내장 TTS
+      const u = new SpeechSynthesisUtterance(text);
+      u.lang = "en-US";
+      u.rate = 0.9;
+      speechSynthesis.cancel();
+      speechSynthesis.speak(u);
+    }
   } finally {
     $("#btnListen").disabled = false;
   }
+}
+
+/* ---------- 발음 채점 (Azure Speech JS SDK — 브라우저 직접) ---------- */
+function parseAzureDetail(detail) {
+  const nb = (detail.NBest || [{}])[0];
+  const pa = nb.PronunciationAssessment || {};
+  return {
+    ok: true,
+    recognized: nb.Display || "",
+    pron: pa.PronScore,
+    accuracy: pa.AccuracyScore,
+    fluency: pa.FluencyScore,
+    completeness: pa.CompletenessScore,
+    prosody: pa.ProsodyScore,
+    words: (nb.Words || []).map((w) => ({
+      word: w.Word || "",
+      score: (w.PronunciationAssessment || {}).AccuracyScore,
+      error: (w.PronunciationAssessment || {}).ErrorType || "None",
+      phonemes: (w.Phonemes || []).map((ph) => ({
+        p: ph.Phoneme || "",
+        score: (ph.PronunciationAssessment || {}).AccuracyScore,
+      })),
+    })),
+  };
+}
+
+function assessWithSDK(wavBlob, refText) {
+  return new Promise((resolve, reject) => {
+    if (!state.azureKey) return reject(new Error("Azure 키가 설정되지 않았습니다. ⚙️ 설정에서 입력하세요."));
+    if (typeof SpeechSDK === "undefined") return reject(new Error("Speech SDK 로드 실패 — 인터넷 연결을 확인하세요."));
+    const speechConfig = SpeechSDK.SpeechConfig.fromSubscription(state.azureKey, state.region);
+    speechConfig.speechRecognitionLanguage = "en-US";
+    const file = new File([wavBlob], "audio.wav", { type: "audio/wav" });
+    const audioConfig = SpeechSDK.AudioConfig.fromWavFileInput(file);
+    const pa = new SpeechSDK.PronunciationAssessmentConfig(
+      refText,
+      SpeechSDK.PronunciationAssessmentGradingSystem.HundredMark,
+      SpeechSDK.PronunciationAssessmentGranularity.Phoneme,
+      true // enableMiscue
+    );
+    pa.phonemeAlphabet = "IPA";
+    pa.enableProsodyAssessment = true;
+    const rec = new SpeechSDK.SpeechRecognizer(speechConfig, audioConfig);
+    pa.applyTo(rec);
+    rec.recognizeOnceAsync(
+      (result) => {
+        rec.close();
+        if (result.reason === SpeechSDK.ResultReason.RecognizedSpeech) {
+          try {
+            const detail = JSON.parse(result.properties.getProperty(SpeechSDK.PropertyId.SpeechServiceResponse_JsonResult));
+            resolve(parseAzureDetail(detail));
+          } catch (e) {
+            reject(new Error("결과 해석 실패: " + e.message));
+          }
+        } else if (result.reason === SpeechSDK.ResultReason.NoMatch) {
+          resolve({ ok: false, status: "InitialSilenceTimeout" });
+        } else if (result.reason === SpeechSDK.ResultReason.Canceled) {
+          const cd = SpeechSDK.CancellationDetails.fromResult(result);
+          const msg = cd.errorDetails || String(cd.reason);
+          reject(new Error(/401|Authentication|Forbidden/i.test(msg)
+            ? "Azure 인증 실패 — 키/리전을 확인하세요."
+            : "Azure 오류: " + msg.slice(0, 200)));
+        } else {
+          reject(new Error("채점 실패: " + result.reason));
+        }
+      },
+      (err) => { rec.close(); reject(new Error("Azure 오류: " + String(err).slice(0, 200))); }
+    );
+  });
 }
 
 /* ---------- 녹음 & 채점 ---------- */
@@ -248,6 +351,11 @@ async function toggleRecord() {
 
   const text = currentSentence().text;
   if (!text) { setStatus("먼저 문장을 선택/입력하세요"); return; }
+  if (!state.azureKey) {
+    setStatus("⚙️ 설정에서 Azure 키를 먼저 입력하세요");
+    $("#modal").classList.remove("hidden");
+    return;
+  }
   try {
     recorder = new WavRecorder();
     await recorder.start((lv) => { $("#level").style.width = Math.round(lv * 100) + "%"; });
@@ -282,13 +390,7 @@ async function stopAndAssess() {
     state.lastBlobUrl = URL.createObjectURL(wav);
 
     const text = currentSentence().text;
-    const res = await fetch("/api/assess?text=" + encodeURIComponent(text), {
-      method: "POST",
-      headers: { "Content-Type": "audio/wav" },
-      body: wav,
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "채점 실패");
+    const data = await assessWithSDK(wav, text);
     if (!data.ok) {
       setStatus(data.status === "InitialSilenceTimeout"
         ? "🔇 음성이 감지되지 않았습니다. 다시 시도하세요."
@@ -375,9 +477,9 @@ function renderResult(data, refText) {
 function renderPhonemes(w) {
   const panel = $("#phonemePanel");
   const chips = w.phonemes.map((ph) =>
-    `<div class="ph c-${scoreClass(ph.score)}">/${ph.p}/<span class="s">${ph.score == null ? "-" : Math.round(ph.score)}</span></div>`
+    `<div class="ph c-${scoreClass(ph.score)}">/${escapeHtml(ph.p)}/<span class="s">${ph.score == null ? "-" : Math.round(ph.score)}</span></div>`
   ).join("");
-  panel.innerHTML = `<h3>"${w.word}" — 음소별 점수 (${w.error !== "None" ? w.error + ", " : ""}단어 ${w.score == null ? "-" : Math.round(w.score)}점)</h3><div class="ph-chips">${chips}</div>`;
+  panel.innerHTML = `<h3>"${escapeHtml(w.word)}" — 음소별 점수 (${w.error !== "None" ? w.error + ", " : ""}단어 ${w.score == null ? "-" : Math.round(w.score)}점)</h3><div class="ph-chips">${chips}</div>`;
   panel.classList.remove("hidden");
 }
 
@@ -398,7 +500,7 @@ function renderHistory() {
   const el = $("#history");
   if (!hist.length) { el.textContent = "아직 기록이 없습니다."; return; }
   el.innerHTML = hist.slice(0, 8).map((h) =>
-    `<div class="h-item"><span class="txt">${h.t}</span><span>${h.d.slice(5)}</span><span class="sc c-${scoreClass(h.pron)}">${h.pron == null ? "-" : Math.round(h.pron)}</span></div>`
+    `<div class="h-item"><span class="txt">${escapeHtml(h.t)}</span><span>${h.d.slice(5)}</span><span class="sc c-${scoreClass(h.pron)}">${h.pron == null ? "-" : Math.round(h.pron)}</span></div>`
   ).join("");
 }
 
@@ -427,47 +529,86 @@ function renderWeakPhonemes() {
   const el = $("#weakPhonemes");
   if (!rows.length) { el.textContent = "아직 데이터가 없습니다. 문장을 채점하면 쌓입니다."; return; }
   el.innerHTML = rows.map((r) =>
-    `<div class="weak-ph"><span class="sym c-${scoreClass(r.avg)}">/${r.p}/</span><span class="avg">평균 ${Math.round(r.avg)}점 · ${r.cnt}회</span></div>`
+    `<div class="weak-ph"><span class="sym c-${scoreClass(r.avg)}">/${escapeHtml(r.p)}/</span><span class="avg">평균 ${Math.round(r.avg)}점 · ${r.cnt}회</span></div>`
   ).join("");
 }
 
-/* ---------- 설정 ---------- */
-async function loadConfig() {
-  try {
-    const cfg = await (await fetch("/api/config")).json();
-    $("#cfgRegion").value = cfg.region || "koreacentral";
-    if (cfg.hasKey) $("#cfgKey").placeholder = "저장됨: " + cfg.keyMasked;
-    state.geminiKey = cfg.geminiKey || "";
-    if (cfg.hasGemini) $("#cfgGemini").placeholder = "저장됨 (변경 시에만 입력)";
-    $("#keyBanner").classList.toggle("hidden", cfg.hasKey);
-  } catch { /* 서버 없이 열었을 때 */ }
+/* ---------- 설정 (localStorage 우선, 로컬 서버에서 최초 이관) ---------- */
+function maskKey(k) { return k.length > 8 ? k.slice(0, 4) + "…" + k.slice(-4) : "●●●●"; }
+
+function applyConfig(cfg) {
+  state.azureKey = cfg.azureKey || "";
+  state.region = cfg.region || "koreacentral";
+  state.geminiKey = cfg.geminiKey || "";
+  $("#cfgRegion").value = state.region;
+  $("#cfgKey").placeholder = state.azureKey ? "저장됨: " + maskKey(state.azureKey) : "Azure Speech 키";
+  $("#cfgGemini").placeholder = state.geminiKey ? "저장됨 (변경 시에만 입력)" : "AIzaSy...";
+  $("#keyBanner").classList.toggle("hidden", !!state.azureKey);
 }
 
-async function saveConfig() {
-  const body = { azure_region: $("#cfgRegion").value };
-  const key = $("#cfgKey").value.trim();
-  if (key) body.azure_key = key;
-  const gkey = $("#cfgGemini").value.trim();
-  if (gkey) body.gemini_key = gkey;
-  await fetch("/api/config", { method: "POST", body: JSON.stringify(body) });
+function loadConfig() {
+  const cfg = JSON.parse(localStorage.getItem("ec_cfg") || "null");
+  if (cfg) { applyConfig(cfg); return; }
+  applyConfig({});
+  // 로컬 서버(config.json)에서 1회 이관 — GitHub Pages에서는 조용히 실패
+  fetch("/api/config")
+    .then((r) => (r.ok ? r.json() : Promise.reject()))
+    .then((s) => {
+      const imported = { azureKey: s.azureKey || "", region: s.region || "koreacentral", geminiKey: s.geminiKey || "" };
+      if (imported.azureKey || imported.geminiKey) {
+        localStorage.setItem("ec_cfg", JSON.stringify(imported));
+        applyConfig(imported);
+      }
+    })
+    .catch(() => {});
+}
+
+function saveConfig() {
+  const cfg = JSON.parse(localStorage.getItem("ec_cfg") || "{}");
+  cfg.region = $("#cfgRegion").value;
+  const k = $("#cfgKey").value.trim();
+  if (k) cfg.azureKey = k;
+  const g = $("#cfgGemini").value.trim();
+  if (g) cfg.geminiKey = g;
+  localStorage.setItem("ec_cfg", JSON.stringify(cfg));
+  // 로컬 서버가 있으면 config.json에도 백업 (없으면 조용히 실패)
+  fetch("/api/config", {
+    method: "POST",
+    body: JSON.stringify({ azure_key: k || undefined, azure_region: cfg.region, gemini_key: g || undefined }),
+  }).catch(() => {});
   const st = $("#cfgStatus");
-  st.textContent = "저장되었습니다";
+  st.textContent = "저장되었습니다 (이 기기에만 저장)";
   st.className = "cfg-status ok";
   $("#cfgKey").value = "";
   $("#cfgGemini").value = "";
-  loadConfig();
+  applyConfig(cfg);
 }
 
 async function testConfig() {
   const st = $("#cfgStatus");
   st.textContent = "테스트 중...";
   st.className = "cfg-status";
-  const key = $("#cfgKey").value.trim();
-  if (key) await fetch("/api/config", { method: "POST", body: JSON.stringify({ azure_key: key, azure_region: $("#cfgRegion").value }) });
-  const r = await (await fetch("/api/test")).json();
-  st.textContent = (r.ok ? "✅ " : "❌ ") + r.message;
-  st.className = "cfg-status " + (r.ok ? "ok" : "fail");
-  if (key) { $("#cfgKey").value = ""; loadConfig(); }
+  const key = $("#cfgKey").value.trim() || state.azureKey;
+  const region = $("#cfgRegion").value;
+  if (!key) {
+    st.textContent = "❌ Azure 키를 입력하세요";
+    st.className = "cfg-status fail";
+    return;
+  }
+  try {
+    const r = await fetch(`https://${region}.api.cognitive.microsoft.com/sts/v1.0/issueToken`, {
+      method: "POST",
+      headers: { "Ocp-Apim-Subscription-Key": key },
+    });
+    if (r.ok) { st.textContent = "✅ 연결 성공"; st.className = "cfg-status ok"; }
+    else {
+      st.textContent = "❌ " + (r.status === 401 || r.status === 403 ? "키가 올바르지 않거나 리전이 다릅니다" : "HTTP " + r.status);
+      st.className = "cfg-status fail";
+    }
+  } catch {
+    st.textContent = "⚠️ 직접 테스트 불가 — 저장 후 채점을 시도해 확인하세요";
+    st.className = "cfg-status";
+  }
 }
 
 /* ================================================================
@@ -482,7 +623,7 @@ const TOPICS = [
   { key: "research", label: "내 연구 설명하기", en: "explaining the student's research in simple English" },
 ];
 
-// 사용자 키로 ListModels 조회해 확인한 bidiGenerateContent 지원 모델 (2026-07 기준)
+// ListModels(bidiGenerateContent 지원) 조회 결과 기준 (2026-07)
 const LIVE_MODELS = [
   "gemini-2.5-flash-native-audio-latest",
   "gemini-3.1-flash-live-preview",
@@ -777,7 +918,7 @@ function stopLesson(statusMsg) {
   convStatus(statusMsg || "대기 중", "");
 }
 
-/* ---- 수업 종료 리포트 (Gemini REST, 무료 티어) ---- */
+/* ---- 수업 종료 리포트 (Gemini REST, 무료 티어, 혼잡 시 모델 폴백) ---- */
 async function makeReport() {
   const turns = conv.transcript.map((t) => (t.role === "user" ? "Student: " : "Teacher: ") + t.text).join("\n");
   if (!turns.trim()) { convStatus("리포트를 만들 대화 내용이 없습니다", "fail"); return; }

@@ -1,6 +1,9 @@
 # -*- coding: utf-8 -*-
-"""English Coach - 로컬 서버
-정적 파일 서빙 + Azure Pronunciation Assessment 프록시 + edge-tts 원어민 음성
+"""English Coach - 로컬 개발 서버 (선택 사항)
+앱은 완전 정적(GitHub Pages 배포 가능)이며, 이 서버는 PC에서 편의 기능만 제공:
+  - 정적 파일 서빙
+  - /api/tts    : edge-tts 원어민 음성 (없으면 앱이 Azure TTS/브라우저 TTS로 폴백)
+  - /api/config : 키를 config.json에 백업 저장/이관 (앱의 기본 저장소는 localStorage)
 실행: python english-coach/server.py  →  http://localhost:8735
 """
 import asyncio
@@ -29,100 +32,6 @@ def load_config():
 def save_config(cfg):
     with open(CONFIG_PATH, "w", encoding="utf-8") as f:
         json.dump(cfg, f, ensure_ascii=False, indent=2)
-
-
-def azure_assess(audio_bytes, ref_text, cfg):
-    """Azure Speech SDK로 발음 평가.
-    (REST 단문 API는 koreacentral 등 일부 리전에서 발음평가 헤더를 거부하므로 SDK 사용)
-    """
-    region = cfg.get("azure_region", "koreacentral")
-    key = cfg.get("azure_key", "")
-    if not key:
-        raise RuntimeError("NO_KEY")
-    try:
-        import azure.cognitiveservices.speech as speechsdk
-    except ImportError:
-        raise RuntimeError(
-            "Speech SDK가 없습니다. 터미널에서 실행하세요: pip install azure-cognitiveservices-speech"
-        )
-
-    import tempfile
-    fd, wav_path = tempfile.mkstemp(suffix=".wav")
-    try:
-        with os.fdopen(fd, "wb") as f:
-            f.write(audio_bytes)
-
-        speech_config = speechsdk.SpeechConfig(subscription=key, region=region)
-        audio_config = speechsdk.audio.AudioConfig(filename=wav_path)
-        pa = speechsdk.PronunciationAssessmentConfig(
-            reference_text=ref_text,
-            grading_system=speechsdk.PronunciationAssessmentGradingSystem.HundredMark,
-            granularity=speechsdk.PronunciationAssessmentGranularity.Phoneme,
-            enable_miscue=True,
-        )
-        pa.phoneme_alphabet = "IPA"
-        pa.enable_prosody_assessment()
-        recognizer = speechsdk.SpeechRecognizer(
-            speech_config=speech_config, language="en-US", audio_config=audio_config
-        )
-        pa.apply_to(recognizer)
-        result = recognizer.recognize_once()
-
-        if result.reason == speechsdk.ResultReason.RecognizedSpeech:
-            detail = json.loads(
-                result.properties.get(speechsdk.PropertyId.SpeechServiceResponse_JsonResult)
-            )
-            detail.setdefault("RecognitionStatus", "Success")
-            return detail
-        if result.reason == speechsdk.ResultReason.NoMatch:
-            return {"RecognitionStatus": "InitialSilenceTimeout"}
-        if result.reason == speechsdk.ResultReason.Canceled:
-            cd = result.cancellation_details
-            msg = cd.error_details or str(cd.reason)
-            if "401" in msg or "Authentication" in msg or "1006" in msg:
-                raise RuntimeError("Azure 인증 실패 — 키/리전을 확인하세요.")
-            raise RuntimeError(f"Azure 오류: {msg[:200]}")
-        return {"RecognitionStatus": str(result.reason)}
-    finally:
-        try:
-            os.remove(wav_path)
-        except OSError:
-            pass
-
-
-def simplify(azure_resp):
-    """Azure 응답을 프런트가 쓰기 좋은 형태로 축약."""
-    status = azure_resp.get("RecognitionStatus", "Unknown")
-    if status != "Success":
-        return {"ok": False, "status": status}
-    nbest = (azure_resp.get("NBest") or [{}])[0]
-    pa = nbest.get("PronunciationAssessment", {})
-    words = []
-    for w in nbest.get("Words", []):
-        wpa = w.get("PronunciationAssessment", {})
-        words.append({
-            "word": w.get("Word", ""),
-            "score": wpa.get("AccuracyScore"),
-            "error": wpa.get("ErrorType", "None"),
-            "phonemes": [
-                {
-                    "p": ph.get("Phoneme", ""),
-                    "score": ph.get("PronunciationAssessment", {}).get("AccuracyScore"),
-                }
-                for ph in w.get("Phonemes", [])
-            ],
-        })
-    return {
-        "ok": True,
-        "status": status,
-        "recognized": nbest.get("Display", ""),
-        "pron": pa.get("PronScore"),
-        "accuracy": pa.get("AccuracyScore"),
-        "fluency": pa.get("FluencyScore"),
-        "completeness": pa.get("CompletenessScore"),
-        "prosody": pa.get("ProsodyScore"),
-        "words": words,
-    }
 
 
 def azure_test_key(cfg):
@@ -180,15 +89,11 @@ class Handler(SimpleHTTPRequestHandler):
         parsed = urllib.parse.urlparse(self.path)
         if parsed.path == "/api/config":
             cfg = load_config()
-            key = cfg.get("azure_key", "")
-            gemini = cfg.get("gemini_key", "")
+            # 로컬 전용 서버: 브라우저(localStorage)로 키를 이관하기 위해 원문 반환
             self._json({
                 "region": cfg.get("azure_region", "koreacentral"),
-                "hasKey": bool(key),
-                "keyMasked": (key[:4] + "…" + key[-4:]) if len(key) > 8 else "",
-                # 로컬 전용 앱: 브라우저가 Gemini Live WebSocket에 직접 연결하므로 키 원문 반환
-                "geminiKey": gemini,
-                "hasGemini": bool(gemini),
+                "azureKey": cfg.get("azure_key", ""),
+                "geminiKey": cfg.get("gemini_key", ""),
             })
         elif parsed.path == "/api/test":
             ok, msg = azure_test_key(load_config())
@@ -237,37 +142,6 @@ class Handler(SimpleHTTPRequestHandler):
                 cfg["gemini_key"] = data["gemini_key"].strip()
             save_config(cfg)
             self._json({"ok": True})
-
-        elif parsed.path == "/api/assess":
-            qs = urllib.parse.parse_qs(parsed.query)
-            ref_text = (qs.get("text") or [""])[0].strip()
-            if not ref_text:
-                self._json({"error": "reference text 누락"}, 400)
-                return
-            if len(body) < 1000:
-                self._json({"error": "오디오가 너무 짧습니다"}, 400)
-                return
-            try:
-                result = simplify(azure_assess(body, ref_text, load_config()))
-                self._json(result)
-            except RuntimeError as e:
-                if str(e) == "NO_KEY":
-                    self._json({"error": "Azure 키가 설정되지 않았습니다. ⚙️ 설정에서 입력하세요."}, 400)
-                else:
-                    self._json({"error": str(e)}, 500)
-            except urllib.error.HTTPError as e:
-                detail = ""
-                try:
-                    detail = e.read().decode("utf-8")[:300]
-                except Exception:
-                    pass
-                if e.code in (401, 403):
-                    msg = "Azure 인증 실패 — 키/리전을 확인하세요."
-                else:
-                    msg = f"Azure 오류 (HTTP {e.code}) {detail}"
-                self._json({"error": msg}, 502)
-            except Exception as e:
-                self._json({"error": f"서버 오류: {e}"}, 500)
         else:
             self._json({"error": "not found"}, 404)
 
