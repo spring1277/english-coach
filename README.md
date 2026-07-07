@@ -1,67 +1,48 @@
-# 🎙️ English Coach — 발음 트레이너 + 회화 수업
+# 🎙️ English Coach — 발음 트레이너 + 회화 수업 (PWA)
 
-두 가지 모드:
+완전 정적 웹앱 — PC·폰 어디서나 브라우저로 사용. 서버 불필요 (GitHub Pages 배포 가능).
+
+두 가지 학습 모드 + 연결 루프:
 - **🔤 발음 연습** — Azure Pronunciation Assessment로 문장을 **음소 단위** 채점, 취약 음소 누적 추적
 - **💬 회화 수업** — Gemini Live API로 원어민 선생님(Emma)과 실시간 음성 대화, 수업 후 교정 리포트
+- **🗂 오답 은행** — 수업에서 교정받은 문장 → "고쳐 말하기" 발음 훈련 → 80점×3회 졸업
+- **📊 통계** — 점수 추이, 취약 음소 순위, 연속 학습일, 수업 시간 누적
 
-## 실행
+## 사용 방법
 
-최초 1회 설치:
-
+### PC (로컬)
 ```
-pip install azure-cognitiveservices-speech
+python server.py    # 또는 start.bat 더블클릭
 ```
+→ http://localhost:8735 (로컬 서버는 edge-tts 원어민 음성 + config.json 키 백업 제공)
 
-서버 시작 (또는 `start.bat` 더블클릭):
+### 폰 (GitHub Pages 배포 후)
+1. https://spring1277.github.io/english-coach/ 접속 (배포 후)
+2. ⚙️ 설정에서 Azure·Gemini 키 입력 (기기별 1회, localStorage 저장)
+3. Chrome 메뉴 → **홈 화면에 추가** → 앱처럼 사용
 
+## API 키 (모두 무료 티어)
+
+| 키 | 용도 | 발급 |
+|---|---|---|
+| Azure Speech (F0, 월 5시간) | 발음 채점 + TTS | portal.azure.com → Speech 리소스 → 키 및 엔드포인트 |
+| Gemini | 회화 수업 + 리포트 | aistudio.google.com/apikey |
+
+키는 브라우저 localStorage(기기별)에만 저장. PC 로컬 서버 사용 시 config.json에서 자동 이관.
+
+## 기술 메모
+
+- **발음 채점은 Azure Speech JS SDK(브라우저 직접 연결)** — REST 단문 API는 koreacentral 등에서 Pronunciation-Assessment 헤더를 400 거부함. GradingSystem enum은 `HundredMark`
+- **Gemini Live 모델명은 자주 바뀜** — 연결 실패 시 ListModels(bidiGenerateContent 지원)로 재조회해 app.js `LIVE_MODELS` 갱신. 리포트는 `gemini-flash-latest`, 429/503 시 자동 폴백
+- 마이크는 HTTPS(또는 localhost)에서만 동작 → 폰 사용은 GitHub Pages(HTTPS) 필수
+- 서비스워커는 네트워크 우선(항상 최신 코드), 오프라인 시 캐시 폴백
+- 학습 데이터: localStorage (ec_cfg, ec_history, ec_phonemes, ec_wrongbank, ec_reports, ec_daily, ec_sessions)
+
+## 배포 (GitHub Pages)
+
+my-apps 저장소에서 서브트리 푸시:
 ```
-python english-coach/server.py
+git remote add ec https://github.com/spring1277/english-coach.git   # 최초 1회
+git subtree push --prefix english-coach ec main
 ```
-
-→ 브라우저에서 http://localhost:8735 열기 (마이크 권한 허용 필요)
-
-## Azure 무료 키 발급 (최초 1회, 카드 등록 불필요)
-
-1. https://portal.azure.com 로그인 (Microsoft 계정)
-2. **리소스 만들기** → "Speech" 검색 → **음성 서비스(Speech)** 선택
-3. 리전: **Korea Central**, 가격 책정 계층: **Free (F0)** ← 월 5시간 무료
-4. 생성 후 리소스의 **키 및 엔드포인트** 메뉴에서 **키 1** 복사
-5. 앱의 ⚙️ 설정에서 키 붙여넣기 → **연결 테스트** → 저장
-
-키는 `english-coach/config.json`에 로컬 저장되며 git에는 올라가지 않습니다.
-
-## Gemini 무료 키 발급 (💬 회화 수업용, 최초 1회)
-
-1. https://aistudio.google.com/apikey 접속 (Google 계정)
-2. **API 키 만들기** → 키 복사
-3. 앱의 ⚙️ 설정 → Gemini API 키 붙여넣기 → 저장
-
-## 기능
-
-**🔤 발음 연습**
-- 연습 문장: 일상 회화 / 진료·학술 / 발음 집중훈련(th, r/l, v/b, 모음 최소대립쌍) / 직접 입력
-- 원어민 듣기: edge-tts (미설치 시 브라우저 TTS 폴백)
-- 채점: 총점·정확도·유창성·억양(prosody)·완성도 + 단어별 색깔 표시
-- 음소 분석: 단어 클릭 → IPA 음소별 점수
-- 취약 음소 통계·최근 기록 (localStorage)
-
-**💬 회화 수업**
-- 주제 선택: 자유 대화 / 오늘 하루 / 여행 / 병원·검사실 / 학회 스몰토크 / 내 연구 설명하기
-- Gemini Live API 실시간 음성 대화 (끼어들기 가능, 자동 음성 감지)
-- 실시간 자막 (내 발화 + 선생님 발화)
-- 수업 종료 → 한국어 교정 리포트 자동 생성 (교정 문장 / 잘한 표현 / 다음 연습 포인트)
-- 연결·리포트 모두 모델 혼잡/미지원 시 자동 폴백
-- ⚠️ 헤드폰 사용 권장 (에코 방지)
-
-**🗂 오답 은행 (수업 ↔ 발음 연습 연결)**
-- 리포트의 교정 문장(❌→✅)이 오답 은행에 자동 저장
-- 발음 연습의 **오답 복습** 탭 → "고쳐 말하기" 훈련: ❌ 틀린 문장을 보고 고쳐서 말하면 ✅ 정답 기준으로 발음 채점 (능동 회상)
-- 80점 이상 3회 성공 시 🎓 졸업, 수동 삭제 가능
-
-**📊 통계 대시보드**
-- 요약 타일: 채점 횟수 / 평균 총점 / 누적 수업 시간 / 연속 학습일
-- 최근 14일 일평균 점수 차트
-- 취약 음소 순위 (평균 정확도 가로 막대)
-- 오답 은행 졸업 진행률, 최근 수업 목록
-
-모든 학습 데이터는 브라우저 localStorage에 저장됩니다 (키: ec_history, ec_phonemes, ec_wrongbank, ec_reports, ec_daily, ec_sessions).
+GitHub 저장소 Settings → Pages → Deploy from a branch → main / (root)
