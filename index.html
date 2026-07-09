@@ -14,7 +14,10 @@
 <body>
 <header>
   <h1>🎙️ English Coach <span class="sub">발음 트레이너</span></h1>
-  <button id="btnSettings" class="icon-btn" title="설정">⚙️</button>
+  <div class="header-btns">
+    <button id="btnSync" class="icon-btn" title="동기화">🔄</button>
+    <button id="btnSettings" class="icon-btn" title="설정">⚙️</button>
+  </div>
 </header>
 
 <div id="keyBanner" class="banner hidden">
@@ -171,6 +174,19 @@
     <p class="hint">
       <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>
       에서 무료 발급.</p>
+    <label>GitHub 토큰 <span class="sub">— ☁️ 기기 간 동기화용 (선택)</span>
+      <input type="password" id="cfgGithub" placeholder="ghp_...">
+    </label>
+    <p class="hint">
+      학습 기록을 PC↔폰 간 동기화하려면
+      <a href="https://github.com/settings/tokens/new?scopes=gist&amp;description=english-coach-sync" target="_blank" rel="noopener">GitHub 토큰 만들기</a>
+      (gist 권한이 미리 체크된 링크)에서 기간 선택 후 <b>Generate token</b> → 붙여넣기.
+      데이터는 내 계정의 비공개 Gist에 저장되며, <b>API 키는 동기화되지 않습니다</b> (기기별 입력).
+    </p>
+    <div class="row sync-row">
+      <button id="cfgSyncNow" class="btn ghost small">☁️ 지금 동기화</button>
+      <span id="syncStatus" class="cfg-status"></span>
+    </div>
     <label>Azure 리전
       <select id="cfgRegion">
         <option value="koreacentral">koreacentral (한국 중부)</option>

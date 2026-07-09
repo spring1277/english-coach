@@ -163,8 +163,13 @@ function renderBank() {
     };
     item.querySelector(".b-del").onclick = () => {
       setBank(getBank().filter((x) => x.id !== b.id));
+      // 삭제 전파용 묘비 기록 (동기화 시 다른 기기에서 부활 방지)
+      const dead = JSON.parse(localStorage.getItem("ec_deleted") || "[]");
+      if (!dead.includes(b.id)) dead.push(b.id);
+      localStorage.setItem("ec_deleted", JSON.stringify(dead.slice(-200)));
       renderBank();
       if (state.category === "review") renderSentence();
+      scheduleSync();
     };
     el.appendChild(item);
   });
@@ -401,6 +406,7 @@ async function stopAndAssess() {
     saveHistory(data, text);
     updatePhonemeStats(data);
     if (data.pron != null) bumpDaily({ pron: data.pron });
+    scheduleSync();
     // 오답 복습이면 훈련 횟수 반영 (80점 이상 3회 → 졸업)
     const cur = currentSentence();
     if (cur.review) {
@@ -496,7 +502,7 @@ function saveHistory(data, text) {
 }
 
 function renderHistory() {
-  const hist = JSON.parse(localStorage.getItem("ec_history") || "[]");
+  const hist = aggHistory();
   const el = $("#history");
   if (!hist.length) { el.textContent = "아직 기록이 없습니다."; return; }
   el.innerHTML = hist.slice(0, 8).map((h) =>
@@ -520,7 +526,7 @@ function updatePhonemeStats(data) {
 }
 
 function renderWeakPhonemes() {
-  const stats = JSON.parse(localStorage.getItem("ec_phonemes") || "{}");
+  const stats = aggPhonemes();
   const rows = Object.entries(stats)
     .map(([p, s]) => ({ p, avg: s.sum / s.cnt, cnt: s.cnt }))
     .filter((r) => r.cnt >= 2 && r.avg < 85)
@@ -543,6 +549,7 @@ function applyConfig(cfg) {
   $("#cfgRegion").value = state.region;
   $("#cfgKey").placeholder = state.azureKey ? "저장됨: " + maskKey(state.azureKey) : "Azure Speech 키";
   $("#cfgGemini").placeholder = state.geminiKey ? "저장됨 (변경 시에만 입력)" : "AIzaSy...";
+  $("#cfgGithub").placeholder = cfg.githubToken ? "저장됨 (변경 시에만 입력)" : "ghp_...";
   $("#keyBanner").classList.toggle("hidden", !!state.azureKey);
 }
 
@@ -570,6 +577,8 @@ function saveConfig() {
   if (k) cfg.azureKey = k;
   const g = $("#cfgGemini").value.trim();
   if (g) cfg.geminiKey = g;
+  const ghtok = $("#cfgGithub").value.trim();
+  if (ghtok) { cfg.githubToken = ghtok; delete cfg.gistId; }
   localStorage.setItem("ec_cfg", JSON.stringify(cfg));
   // 로컬 서버가 있으면 config.json에도 백업 (없으면 조용히 실패)
   fetch("/api/config", {
@@ -581,7 +590,9 @@ function saveConfig() {
   st.className = "cfg-status ok";
   $("#cfgKey").value = "";
   $("#cfgGemini").value = "";
+  $("#cfgGithub").value = "";
   applyConfig(cfg);
+  if (ghtok) syncNow(false); // 토큰 새로 저장 → 즉시 첫 동기화
 }
 
 async function testConfig() {
@@ -609,6 +620,219 @@ async function testConfig() {
     st.textContent = "⚠️ 직접 테스트 불가 — 저장 후 채점을 시도해 확인하세요";
     st.className = "cfg-status";
   }
+}
+
+/* ================================================================
+   ☁️ 기기 간 동기화 — GitHub 비공개 Gist
+   구조: devices.<기기ID> = {daily, phonemes, history, sessions}  ← 기기별 버킷 (중복 집계 방지)
+         shared = {wrongbank, reports, deleted}                    ← 병합 공유
+   ================================================================ */
+const GIST_DESC = "english-coach-sync";
+let syncTimer = null;
+
+function deviceId() {
+  let id = localStorage.getItem("ec_device");
+  if (!id) {
+    id = (crypto.randomUUID ? crypto.randomUUID() : Date.now() + "_" + Math.random().toString(36).slice(2));
+    localStorage.setItem("ec_device", id);
+  }
+  return id;
+}
+
+function ghHeaders(tok) {
+  return { "Authorization": "token " + tok, "Accept": "application/vnd.github+json" };
+}
+
+async function gistLocate(tok) {
+  const cfg = JSON.parse(localStorage.getItem("ec_cfg") || "{}");
+  if (cfg.gistId) return cfg.gistId;
+  const r = await fetch("https://api.github.com/gists?per_page=100", { headers: ghHeaders(tok) });
+  if (r.status === 401) throw new Error("GitHub 토큰이 유효하지 않습니다");
+  if (!r.ok) throw new Error("GitHub 연결 실패 (HTTP " + r.status + ")");
+  const found = (await r.json()).find((g) => g.description === GIST_DESC);
+  let id;
+  if (found) {
+    id = found.id;
+  } else {
+    const c = await fetch("https://api.github.com/gists", {
+      method: "POST",
+      headers: ghHeaders(tok),
+      body: JSON.stringify({ description: GIST_DESC, public: false, files: { "data.json": { content: "{}" } } }),
+    });
+    if (!c.ok) throw new Error("동기화 저장소 생성 실패 (토큰에 gist 권한이 있는지 확인)");
+    id = (await c.json()).id;
+  }
+  cfg.gistId = id;
+  localStorage.setItem("ec_cfg", JSON.stringify(cfg));
+  return id;
+}
+
+function collectDeviceData() {
+  return {
+    updated: Date.now(),
+    daily: JSON.parse(localStorage.getItem("ec_daily") || "{}"),
+    phonemes: JSON.parse(localStorage.getItem("ec_phonemes") || "{}"),
+    history: JSON.parse(localStorage.getItem("ec_history") || "[]"),
+    sessions: JSON.parse(localStorage.getItem("ec_sessions") || "[]"),
+  };
+}
+
+function mergeById(a, b, keyFn, better) {
+  const map = new Map();
+  for (const x of [...(a || []), ...(b || [])]) {
+    if (!x) continue;
+    const k = keyFn(x);
+    if (!map.has(k)) map.set(k, x);
+    else if (better) map.set(k, better(map.get(k), x));
+  }
+  return [...map.values()];
+}
+
+async function syncNow(silent) {
+  const cfg = JSON.parse(localStorage.getItem("ec_cfg") || "{}");
+  const tok = cfg.githubToken;
+  const stEl = $("#syncStatus");
+  const btn = $("#btnSync");
+  if (!tok) {
+    if (!silent) {
+      $("#modal").classList.remove("hidden");
+      if (stEl) { stEl.textContent = "☁️ 동기화하려면 GitHub 토큰을 입력하세요"; stEl.className = "cfg-status fail"; }
+    }
+    return;
+  }
+  try {
+    if (stEl) { stEl.textContent = "동기화 중..."; stEl.className = "cfg-status"; }
+    if (btn) btn.textContent = "⏳";
+    const id = await gistLocate(tok);
+    const g = await fetch("https://api.github.com/gists/" + id, { headers: ghHeaders(tok), cache: "no-store" });
+    if (!g.ok) throw new Error("다운로드 실패 (HTTP " + g.status + ")");
+    let cloud = {};
+    try {
+      const f = (await g.json()).files["data.json"];
+      cloud = JSON.parse(f && f.content ? f.content : "{}");
+    } catch { cloud = {}; }
+    cloud.version = 1;
+    cloud.devices = cloud.devices || {};
+    cloud.shared = cloud.shared || {};
+
+    // 1) 내 기기 버킷 갱신
+    cloud.devices[deviceId()] = collectDeviceData();
+
+    // 2) 삭제 묘비 병합 → 오답 은행 병합 (졸업/훈련횟수는 앞선 쪽 승리)
+    const deleted = [...new Set([
+      ...JSON.parse(localStorage.getItem("ec_deleted") || "[]"),
+      ...(cloud.shared.deleted || []),
+    ])].slice(-200);
+    cloud.shared.deleted = deleted;
+    localStorage.setItem("ec_deleted", JSON.stringify(deleted));
+    let bank = mergeById(getBank(), cloud.shared.wrongbank, (b) => b.id, (x, y) => ({
+      ...x,
+      drill: Math.max(x.drill || 0, y.drill || 0),
+      grad: !!(x.grad || y.grad),
+    }));
+    bank = bank.filter((b) => !deleted.includes(b.id));
+    bank.sort((x, y) => (y.id > x.id ? 1 : -1));
+    cloud.shared.wrongbank = bank.slice(0, 100);
+    setBank(cloud.shared.wrongbank);
+
+    // 3) 리포트 병합
+    const reports = mergeById(
+      JSON.parse(localStorage.getItem("ec_reports") || "[]"),
+      cloud.shared.reports,
+      (r) => r.d + "|" + r.topic
+    );
+    reports.sort((a, b) => b.d.localeCompare(a.d));
+    cloud.shared.reports = reports.slice(0, 20);
+    localStorage.setItem("ec_reports", JSON.stringify(cloud.shared.reports));
+
+    // 4) 다른 기기 버킷을 로컬에 보관 (통계 합산용)
+    const remote = {};
+    for (const [dev, data] of Object.entries(cloud.devices)) {
+      if (dev !== deviceId()) remote[dev] = data;
+    }
+    localStorage.setItem("ec_remote", JSON.stringify(remote));
+
+    // 5) 업로드
+    const up = await fetch("https://api.github.com/gists/" + id, {
+      method: "PATCH",
+      headers: ghHeaders(tok),
+      body: JSON.stringify({ files: { "data.json": { content: JSON.stringify(cloud) } } }),
+    });
+    if (!up.ok) throw new Error("업로드 실패 (HTTP " + up.status + ")");
+
+    cfg.lastSync = Date.now();
+    localStorage.setItem("ec_cfg", JSON.stringify(cfg));
+    renderBank();
+    renderHistory();
+    renderWeakPhonemes();
+    if (!$("#viewDash").classList.contains("hidden")) renderDash();
+    if (state.category === "review") renderSentence();
+    if (stEl) {
+      stEl.textContent = "✅ 동기화 완료 (" + new Date().toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" }) + ")";
+      stEl.className = "cfg-status ok";
+    }
+    if (btn) btn.textContent = "🔄";
+  } catch (e) {
+    if (stEl) { stEl.textContent = "❌ " + e.message; stEl.className = "cfg-status fail"; }
+    if (btn) btn.textContent = "🔄";
+    if (!silent) console.warn("sync failed:", e);
+  }
+}
+
+function scheduleSync() {
+  const cfg = JSON.parse(localStorage.getItem("ec_cfg") || "{}");
+  if (!cfg.githubToken) return;
+  clearTimeout(syncTimer);
+  syncTimer = setTimeout(() => syncNow(true), 8000);
+}
+
+/* ---- 통계 합산 (내 기기 + 다른 기기 버킷) ---- */
+function remoteBuckets() {
+  return Object.values(JSON.parse(localStorage.getItem("ec_remote") || "{}"));
+}
+
+function aggDaily() {
+  const out = {};
+  const add = (daily) => {
+    for (const [k, d] of Object.entries(daily || {})) {
+      const t = out[k] || { n: 0, pronSum: 0, best: 0, convSec: 0 };
+      t.n += d.n || 0;
+      t.pronSum += d.pronSum || 0;
+      t.best = Math.max(t.best, d.best || 0);
+      t.convSec += d.convSec || 0;
+      out[k] = t;
+    }
+  };
+  add(JSON.parse(localStorage.getItem("ec_daily") || "{}"));
+  remoteBuckets().forEach((b) => add(b.daily));
+  return out;
+}
+
+function aggPhonemes() {
+  const out = {};
+  const add = (stats) => {
+    for (const [p, s] of Object.entries(stats || {})) {
+      const t = out[p] || { sum: 0, cnt: 0 };
+      t.sum += s.sum || 0;
+      t.cnt += s.cnt || 0;
+      out[p] = t;
+    }
+  };
+  add(JSON.parse(localStorage.getItem("ec_phonemes") || "{}"));
+  remoteBuckets().forEach((b) => add(b.phonemes));
+  return out;
+}
+
+function aggHistory() {
+  let all = JSON.parse(localStorage.getItem("ec_history") || "[]");
+  remoteBuckets().forEach((b) => { all = all.concat(b.history || []); });
+  return mergeById(all, [], (h) => h.d + "|" + h.t).sort((a, b) => b.d.localeCompare(a.d)).slice(0, 50);
+}
+
+function aggSessions() {
+  let all = JSON.parse(localStorage.getItem("ec_sessions") || "[]");
+  remoteBuckets().forEach((b) => { all = all.concat(b.sessions || []); });
+  return mergeById(all, [], (s) => s.d + "|" + s.topic + "|" + s.sec).sort((a, b) => b.d.localeCompare(a.d)).slice(0, 50);
 }
 
 /* ================================================================
@@ -896,6 +1120,7 @@ function endLessonCleanup() {
       });
       localStorage.setItem("ec_sessions", JSON.stringify(sessions.slice(0, 50)));
       bumpDaily({ convSec: sec });
+      scheduleSync();
     }
     conv.startAt = 0;
   }
@@ -984,6 +1209,7 @@ ${turns}`;
     const reports = JSON.parse(localStorage.getItem("ec_reports") || "[]");
     reports.unshift({ d: new Date().toISOString().slice(0, 16).replace("T", " "), topic: conv.topic.label, report: reportMd });
     localStorage.setItem("ec_reports", JSON.stringify(reports.slice(0, 20)));
+    scheduleSync();
   } catch (e) {
     $("#reportBody").textContent = "❌ " + e.message;
   } finally {
@@ -1024,8 +1250,8 @@ function calcStreak(daily) {
 }
 
 function renderDash() {
-  const daily = JSON.parse(localStorage.getItem("ec_daily") || "{}");
-  const sessions = JSON.parse(localStorage.getItem("ec_sessions") || "[]");
+  const daily = aggDaily();
+  const sessions = aggSessions();
   const bank = getBank();
 
   // ── 요약 타일
@@ -1086,7 +1312,7 @@ function renderDash() {
   }
 
   // ── 취약 음소 순위 (가로 막대)
-  const stats = JSON.parse(localStorage.getItem("ec_phonemes") || "{}");
+  const stats = aggPhonemes();
   const rows = Object.entries(stats)
     .map(([p, s]) => ({ p, avg: Math.round(s.sum / s.cnt), cnt: s.cnt }))
     .filter((r) => r.cnt >= 2)
@@ -1145,6 +1371,11 @@ function init() {
   $("#cfgSave").onclick = saveConfig;
   $("#cfgTest").onclick = testConfig;
   $("#modal").onclick = (e) => { if (e.target === $("#modal")) $("#modal").classList.add("hidden"); };
+
+  // 동기화
+  $("#btnSync").onclick = () => syncNow(false);
+  $("#cfgSyncNow").onclick = () => syncNow(false);
+  setTimeout(() => syncNow(true), 2000); // 앱 시작 시 자동 동기화 (토큰 있을 때만)
 
   // 회화 수업
   renderTopics();
