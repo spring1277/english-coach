@@ -15,6 +15,7 @@
 <header>
   <h1>🎙️ English Coach <span class="sub">발음 트레이너</span></h1>
   <div class="header-btns">
+    <button id="btnProfile" class="profile-chip hidden" title="프로필 전환">👤</button>
     <button id="btnSync" class="icon-btn" title="동기화">🔄</button>
     <button id="btnSettings" class="icon-btn" title="설정">⚙️</button>
   </div>
@@ -151,13 +152,70 @@
     <h2>💬 최근 수업</h2>
     <div id="dashSessions" class="history"></div>
   </section>
+
+  <section id="familySection" class="card hidden">
+    <h2>👨‍👩‍👧‍👦 가족 학습 현황 <span class="sub">(동기화된 자녀 프로필)</span></h2>
+    <div id="familyBoard" class="family-board"></div>
+  </section>
 </div><!-- /viewDash -->
 </main>
+
+<!-- 프로필 선택 오버레이 -->
+<div id="profileOverlay" class="modal hidden">
+  <div class="modal-body">
+    <h2>👨‍👩‍👧‍👦 누가 학습하나요?</h2>
+    <div id="profileList" class="profile-list"></div>
+    <div id="profileAddForm" class="profile-add hidden">
+      <label>이름
+        <input type="text" id="npName" maxlength="10" placeholder="예: 지민">
+      </label>
+      <label>아이콘</label>
+      <div id="npEmojis" class="emoji-row"></div>
+      <div class="row">
+        <button id="npCreate" class="btn">만들기</button>
+        <button id="npCancel" class="btn ghost">취소</button>
+      </div>
+    </div>
+    <div class="row" id="profileActions">
+      <button id="btnAddProfile" class="btn ghost">➕ 프로필 추가</button>
+      <button id="btnOverlaySettings" class="btn ghost small">⚙️ 설정 (동기화)</button>
+    </div>
+    <p class="hint">다른 기기에서 만든 프로필은 ⚙️ 설정에 GitHub 토큰을 넣고 동기화하면 나타납니다.</p>
+  </div>
+</div>
+
+<!-- 레벨 테스트 모달 -->
+<div id="levelModal" class="modal hidden">
+  <div class="modal-body">
+    <h2>🎯 레벨 테스트 <span class="sub" id="ltFor"></span></h2>
+    <p class="hint">문장 6개를 읽으면 발음 점수로 레벨을 정해드려요. 조용한 곳에서 또박또박 읽어주세요.</p>
+    <div id="ltProgress" class="lt-progress"></div>
+    <p id="ltSentence" class="sentence"></p>
+    <div class="lt-center">
+      <button id="ltRec" class="rec-btn">🎤</button>
+      <p id="ltStatus" class="rec-meta">버튼을 누르고 문장을 읽어주세요</p>
+    </div>
+    <div id="ltResult" class="lt-result hidden"></div>
+    <div class="row">
+      <button id="ltSkip" class="btn ghost small">테스트 없이 직접 선택</button>
+      <button id="ltClose" class="btn ghost small">닫기</button>
+    </div>
+    <div id="ltManual" class="row hidden">
+      <button class="btn ghost lt-lv" data-lv="beginner">🌱 초급</button>
+      <button class="btn ghost lt-lv" data-lv="intermediate">🌿 중급</button>
+      <button class="btn ghost lt-lv" data-lv="advanced">🌳 고급</button>
+    </div>
+  </div>
+</div>
 
 <!-- 설정 모달 -->
 <div id="modal" class="modal hidden">
   <div class="modal-body">
-    <h2>⚙️ API 키 설정</h2>
+    <h2>⚙️ 설정</h2>
+    <div id="cfgProfileRow" class="row sync-row hidden">
+      <span id="cfgProfileInfo" class="hint"></span>
+      <button id="cfgLevelTest" class="btn ghost small">🎯 레벨 테스트 다시 보기</button>
+    </div>
     <p class="hint">
       키는 이 기기(브라우저)에만 저장됩니다. 폰에서는 폰에서 한 번 입력하면 됩니다.
     </p>

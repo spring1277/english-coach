@@ -225,4 +225,52 @@ main { max-width: 760px; margin: 0 auto; padding: 0 16px 60px; display: grid; ga
 .report { line-height: 1.7; font-size: 0.95rem; }
 .report h3 { font-size: 0.95rem; color: var(--accent); margin: 12px 0 6px; }
 
+/* ---- 프로필 ---- */
+.profile-chip {
+  background: var(--card2); border: 1px solid #33405e; color: var(--text);
+  border-radius: 999px; padding: 5px 12px; font-size: 0.85rem; cursor: pointer;
+  max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.profile-list { display: grid; gap: 8px; }
+.profile-card {
+  display: flex; align-items: center; gap: 10px;
+  background: var(--card2); border: 1px solid transparent; border-radius: 12px;
+  padding: 12px 14px; cursor: pointer;
+}
+.profile-card:hover, .profile-card.active { border-color: var(--accent); }
+.p-emoji { font-size: 1.5rem; }
+.p-name { flex: 1; font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.p-parent {
+  font-size: 0.72rem; color: var(--accent); border: 1px solid var(--accent);
+  border-radius: 6px; padding: 1px 6px; margin-left: 6px; font-weight: normal;
+}
+.p-level { font-size: 0.8rem; color: var(--dim); white-space: nowrap; }
+.p-del { background: none; border: none; color: var(--dim); cursor: pointer; font-size: 0.9rem; }
+.p-del:hover { color: var(--bad); }
+.profile-add { display: grid; gap: 10px; }
+.emoji-row { display: flex; gap: 6px; flex-wrap: wrap; }
+.emoji-btn {
+  font-size: 1.3rem; background: var(--card2); border: 1px solid transparent;
+  border-radius: 10px; padding: 6px 8px; cursor: pointer;
+}
+.emoji-btn.active { border-color: var(--accent); background: rgba(79,140,255,0.12); }
+
+/* ---- 레벨 테스트 ---- */
+.lt-progress { display: flex; gap: 6px; justify-content: center; min-height: 10px; }
+.lt-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--card2); }
+.lt-dot.done { background: var(--good); }
+.lt-dot.cur { background: var(--accent); }
+.lt-center { text-align: center; display: grid; gap: 4px; justify-items: center; }
+.lt-result { text-align: center; display: grid; gap: 6px; }
+.lt-score { font-size: 1.05rem; color: var(--dim); }
+.lt-level { font-size: 1.6rem; font-weight: 700; }
+
+/* ---- 가족 학습 현황 ---- */
+.family-board { display: grid; gap: 10px; }
+.family-card { background: var(--card2); border-radius: 12px; padding: 12px 14px; display: grid; gap: 8px; }
+.f-head { display: flex; align-items: center; gap: 8px; }
+.f-head .p-level { margin-left: auto; }
+.f-stats { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 0.82rem; color: var(--dim); }
+.f-stats b { color: var(--text); }
+
 .hidden { display: none !important; }

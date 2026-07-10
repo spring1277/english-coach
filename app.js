@@ -5,6 +5,8 @@
 const $ = (s) => document.querySelector(s);
 
 const state = {
+  profileId: "",
+  entered: false,
   category: "daily",
   idx: 0,
   customSentence: "",
@@ -17,6 +19,31 @@ const state = {
 };
 
 const MAX_REC_SEC = 20;
+
+/* ---------- 프로필 (가족 다중 사용자) ----------
+   프로필 목록: ec_profiles (기기 공통), 활성 프로필: ec_active
+   학습 데이터 키는 전부 "키.프로필ID"로 분리 — pk() 참조 */
+const LEVEL_LABELS = { beginner: "🌱 초급", intermediate: "🌿 중급", advanced: "🌳 고급" };
+const PROFILE_EMOJIS = ["🧑‍⚕️", "👩", "👦", "👧", "🧒", "🐯", "🐰", "🦊", "🐼", "⚽", "🎮", "🎀"];
+const DATA_KEYS = ["ec_daily", "ec_phonemes", "ec_history", "ec_sessions", "ec_wrongbank", "ec_deleted", "ec_reports", "ec_remote"];
+
+function getProfiles() { return JSON.parse(localStorage.getItem("ec_profiles") || "[]"); }
+function setProfiles(ps) { localStorage.setItem("ec_profiles", JSON.stringify(ps)); }
+function activeProfile() { return getProfiles().find((p) => p.id === state.profileId) || null; }
+function pk(base) { return base + "." + state.profileId; }
+
+function levelOf() {
+  const p = activeProfile();
+  if (p && p.level) return p.level;
+  return p && !p.isParent ? "intermediate" : "advanced";
+}
+
+function migrateLegacyToProfile(pid) {
+  for (const k of DATA_KEYS) {
+    const v = localStorage.getItem(k);
+    if (v != null) { localStorage.setItem(k + "." + pid, v); localStorage.removeItem(k); }
+  }
+}
 
 /* ---------- WAV 녹음기 (16kHz mono PCM) ---------- */
 class WavRecorder {
@@ -88,7 +115,7 @@ class WavRecorder {
 function todayKey() { return new Date().toISOString().slice(0, 10); }
 
 function bumpDaily(patch) {
-  const daily = JSON.parse(localStorage.getItem("ec_daily") || "{}");
+  const daily = JSON.parse(localStorage.getItem(pk("ec_daily")) || "{}");
   const k = todayKey();
   const d = daily[k] || { n: 0, pronSum: 0, best: 0, convSec: 0 };
   if (patch.pron != null) {
@@ -98,12 +125,12 @@ function bumpDaily(patch) {
   }
   if (patch.convSec) d.convSec += patch.convSec;
   daily[k] = d;
-  localStorage.setItem("ec_daily", JSON.stringify(daily));
+  localStorage.setItem(pk("ec_daily"), JSON.stringify(daily));
 }
 
 /* ---------- 오답 은행 (localStorage) ---------- */
-function getBank() { return JSON.parse(localStorage.getItem("ec_wrongbank") || "[]"); }
-function setBank(bank) { localStorage.setItem("ec_wrongbank", JSON.stringify(bank)); }
+function getBank() { return JSON.parse(localStorage.getItem(pk("ec_wrongbank")) || "[]"); }
+function setBank(bank) { localStorage.setItem(pk("ec_wrongbank"), JSON.stringify(bank)); }
 function reviewItems() { return getBank().filter((b) => !b.grad); }
 
 function addToBank(corrections, topic) {
@@ -164,9 +191,9 @@ function renderBank() {
     item.querySelector(".b-del").onclick = () => {
       setBank(getBank().filter((x) => x.id !== b.id));
       // 삭제 전파용 묘비 기록 (동기화 시 다른 기기에서 부활 방지)
-      const dead = JSON.parse(localStorage.getItem("ec_deleted") || "[]");
+      const dead = JSON.parse(localStorage.getItem(pk("ec_deleted")) || "[]");
       if (!dead.includes(b.id)) dead.push(b.id);
-      localStorage.setItem("ec_deleted", JSON.stringify(dead.slice(-200)));
+      localStorage.setItem(pk("ec_deleted"), JSON.stringify(dead.slice(-200)));
       renderBank();
       if (state.category === "review") renderSentence();
       scheduleSync();
@@ -184,7 +211,8 @@ function currentSentence() {
     const it = items[state.idx % items.length];
     return { text: it.right, tip: it.reason, review: it };
   }
-  const list = SENTENCES[state.category];
+  const bank = SENTENCES_BY_LEVEL[levelOf()] || SENTENCES_BY_LEVEL.advanced;
+  const list = bank[state.category] || bank.daily;
   return list[state.idx % list.length];
 }
 
@@ -210,7 +238,8 @@ function renderSentence() {
 function renderTabs() {
   const tabs = $("#tabs");
   tabs.innerHTML = "";
-  for (const key of ["daily", "medical", "drill", "review", "custom"]) {
+  const cats = Object.keys(SENTENCES_BY_LEVEL[levelOf()] || SENTENCES_BY_LEVEL.advanced);
+  for (const key of [...cats, "review", "custom"]) {
     const b = document.createElement("button");
     b.className = "tab" + (state.category === key ? " active" : "");
     b.textContent = CATEGORY_LABELS[key];
@@ -491,13 +520,13 @@ function renderPhonemes(w) {
 
 /* ---------- 기록 & 취약 음소 (localStorage) ---------- */
 function saveHistory(data, text) {
-  const hist = JSON.parse(localStorage.getItem("ec_history") || "[]");
+  const hist = JSON.parse(localStorage.getItem(pk("ec_history")) || "[]");
   hist.unshift({
     d: new Date().toISOString().slice(0, 16).replace("T", " "),
     t: text,
     pron: data.pron, acc: data.accuracy, flu: data.fluency, pro: data.prosody,
   });
-  localStorage.setItem("ec_history", JSON.stringify(hist.slice(0, 50)));
+  localStorage.setItem(pk("ec_history"), JSON.stringify(hist.slice(0, 50)));
   renderHistory();
 }
 
@@ -511,7 +540,7 @@ function renderHistory() {
 }
 
 function updatePhonemeStats(data) {
-  const stats = JSON.parse(localStorage.getItem("ec_phonemes") || "{}");
+  const stats = JSON.parse(localStorage.getItem(pk("ec_phonemes")) || "{}");
   for (const w of data.words) {
     if (w.error === "Omission") continue;
     for (const ph of w.phonemes || []) {
@@ -521,7 +550,7 @@ function updatePhonemeStats(data) {
       stats[ph.p] = s;
     }
   }
-  localStorage.setItem("ec_phonemes", JSON.stringify(stats));
+  localStorage.setItem(pk("ec_phonemes"), JSON.stringify(stats));
   renderWeakPhonemes();
 }
 
@@ -670,10 +699,10 @@ async function gistLocate(tok) {
 function collectDeviceData() {
   return {
     updated: Date.now(),
-    daily: JSON.parse(localStorage.getItem("ec_daily") || "{}"),
-    phonemes: JSON.parse(localStorage.getItem("ec_phonemes") || "{}"),
-    history: JSON.parse(localStorage.getItem("ec_history") || "[]"),
-    sessions: JSON.parse(localStorage.getItem("ec_sessions") || "[]"),
+    daily: JSON.parse(localStorage.getItem(pk("ec_daily")) || "{}"),
+    phonemes: JSON.parse(localStorage.getItem(pk("ec_phonemes")) || "{}"),
+    history: JSON.parse(localStorage.getItem(pk("ec_history")) || "[]"),
+    sessions: JSON.parse(localStorage.getItem(pk("ec_sessions")) || "[]"),
   };
 }
 
@@ -711,46 +740,92 @@ async function syncNow(silent) {
       const f = (await g.json()).files["data.json"];
       cloud = JSON.parse(f && f.content ? f.content : "{}");
     } catch { cloud = {}; }
-    cloud.version = 1;
-    cloud.devices = cloud.devices || {};
-    cloud.shared = cloud.shared || {};
+    // ---- v2 구조: profiles.<프로필ID> = { meta, devices.<기기ID>, shared } ----
+    cloud.version = 2;
+    cloud.profiles = cloud.profiles || {};
+    cloud.deletedProfiles = cloud.deletedProfiles || [];
 
-    // 1) 내 기기 버킷 갱신
-    cloud.devices[deviceId()] = collectDeviceData();
-
-    // 2) 삭제 묘비 병합 → 오답 은행 병합 (졸업/훈련횟수는 앞선 쪽 승리)
-    const deleted = [...new Set([
-      ...JSON.parse(localStorage.getItem("ec_deleted") || "[]"),
-      ...(cloud.shared.deleted || []),
-    ])].slice(-200);
-    cloud.shared.deleted = deleted;
-    localStorage.setItem("ec_deleted", JSON.stringify(deleted));
-    let bank = mergeById(getBank(), cloud.shared.wrongbank, (b) => b.id, (x, y) => ({
-      ...x,
-      drill: Math.max(x.drill || 0, y.drill || 0),
-      grad: !!(x.grad || y.grad),
-    }));
-    bank = bank.filter((b) => !deleted.includes(b.id));
-    bank.sort((x, y) => (y.id > x.id ? 1 : -1));
-    cloud.shared.wrongbank = bank.slice(0, 100);
-    setBank(cloud.shared.wrongbank);
-
-    // 3) 리포트 병합
-    const reports = mergeById(
-      JSON.parse(localStorage.getItem("ec_reports") || "[]"),
-      cloud.shared.reports,
-      (r) => r.d + "|" + r.topic
-    );
-    reports.sort((a, b) => b.d.localeCompare(a.d));
-    cloud.shared.reports = reports.slice(0, 20);
-    localStorage.setItem("ec_reports", JSON.stringify(cloud.shared.reports));
-
-    // 4) 다른 기기 버킷을 로컬에 보관 (통계 합산용)
-    const remote = {};
-    for (const [dev, data] of Object.entries(cloud.devices)) {
-      if (dev !== deviceId()) remote[dev] = data;
+    // v1 → v2 마이그레이션: 기존 단일 사용자 데이터는 부모 프로필 소속으로
+    if (cloud.devices || cloud.shared) {
+      const par = getProfiles().find((p) => p.isParent);
+      if (par && !cloud.profiles[par.id]) {
+        cloud.profiles[par.id] = { meta: { ...par }, devices: cloud.devices || {}, shared: cloud.shared || {} };
+      }
+      delete cloud.devices;
+      delete cloud.shared;
     }
-    localStorage.setItem("ec_remote", JSON.stringify(remote));
+
+    // 1) 프로필 삭제 묘비 병합
+    const deadP = [...new Set([
+      ...JSON.parse(localStorage.getItem("ec_dead_profiles") || "[]"),
+      ...cloud.deletedProfiles,
+    ])];
+    cloud.deletedProfiles = deadP;
+    localStorage.setItem("ec_dead_profiles", JSON.stringify(deadP));
+    for (const pid of deadP) delete cloud.profiles[pid];
+
+    // 2) 프로필 목록 병합 (id 기준, updated 최신 승리) — 기기 간 프로필 공유
+    const ps = getProfiles().filter((p) => !deadP.includes(p.id));
+    for (const [pid, P] of Object.entries(cloud.profiles)) {
+      if (!P.meta) continue;
+      const local = ps.find((p) => p.id === pid);
+      if (!local) ps.push({ ...P.meta, id: pid });
+      else if ((P.meta.updated || 0) > (local.updated || 0)) Object.assign(local, P.meta, { id: pid });
+    }
+    setProfiles(ps);
+    for (const p of ps) {
+      cloud.profiles[p.id] = cloud.profiles[p.id] || { meta: {}, devices: {}, shared: {} };
+      if ((p.updated || 0) >= ((cloud.profiles[p.id].meta || {}).updated || 0)) {
+        cloud.profiles[p.id].meta = { ...p };
+      }
+    }
+
+    // 3) 활성 프로필의 학습 데이터 동기화 (프로필 선택 전이면 목록만 동기화)
+    if (state.profileId && cloud.profiles[state.profileId]) {
+      const P = cloud.profiles[state.profileId];
+      P.devices = P.devices || {};
+      P.shared = P.shared || {};
+
+      // 내 기기 버킷 갱신
+      P.devices[deviceId()] = collectDeviceData();
+
+      // 삭제 묘비 병합 → 오답 은행 병합 (졸업/훈련횟수는 앞선 쪽 승리)
+      const deleted = [...new Set([
+        ...JSON.parse(localStorage.getItem(pk("ec_deleted")) || "[]"),
+        ...(P.shared.deleted || []),
+      ])].slice(-200);
+      P.shared.deleted = deleted;
+      localStorage.setItem(pk("ec_deleted"), JSON.stringify(deleted));
+      let bank = mergeById(getBank(), P.shared.wrongbank, (b) => b.id, (x, y) => ({
+        ...x,
+        drill: Math.max(x.drill || 0, y.drill || 0),
+        grad: !!(x.grad || y.grad),
+      }));
+      bank = bank.filter((b) => !deleted.includes(b.id));
+      bank.sort((x, y) => (y.id > x.id ? 1 : -1));
+      P.shared.wrongbank = bank.slice(0, 100);
+      setBank(P.shared.wrongbank);
+
+      // 리포트 병합
+      const reports = mergeById(
+        JSON.parse(localStorage.getItem(pk("ec_reports")) || "[]"),
+        P.shared.reports,
+        (r) => r.d + "|" + r.topic
+      );
+      reports.sort((a, b) => b.d.localeCompare(a.d));
+      P.shared.reports = reports.slice(0, 20);
+      localStorage.setItem(pk("ec_reports"), JSON.stringify(P.shared.reports));
+
+      // 다른 기기 버킷을 로컬에 보관 (통계 합산용)
+      const remote = {};
+      for (const [dev, data] of Object.entries(P.devices)) {
+        if (dev !== deviceId()) remote[dev] = data;
+      }
+      localStorage.setItem(pk("ec_remote"), JSON.stringify(remote));
+    }
+
+    // 4) 가족 전체 프로필 데이터 보관 (부모 대시보드용)
+    localStorage.setItem("ec_family", JSON.stringify(cloud.profiles));
 
     // 5) 업로드
     const up = await fetch("https://api.github.com/gists/" + id, {
@@ -762,11 +837,17 @@ async function syncNow(silent) {
 
     cfg.lastSync = Date.now();
     localStorage.setItem("ec_cfg", JSON.stringify(cfg));
-    renderBank();
-    renderHistory();
-    renderWeakPhonemes();
-    if (!$("#viewDash").classList.contains("hidden")) renderDash();
-    if (state.category === "review") renderSentence();
+    if (state.entered) {
+      renderBank();
+      renderHistory();
+      renderWeakPhonemes();
+      renderProfileChip();
+      renderCfgProfileRow();
+      if (!$("#viewDash").classList.contains("hidden")) renderDash();
+      if (state.category === "review") renderSentence();
+    } else if (!$("#profileOverlay").classList.contains("hidden")) {
+      renderProfileOverlay(); // 새 기기: 클라우드에서 불러온 가족 프로필 표시
+    }
     if (stEl) {
       stEl.textContent = "✅ 동기화 완료 (" + new Date().toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" }) + ")";
       stEl.className = "cfg-status ok";
@@ -788,7 +869,7 @@ function scheduleSync() {
 
 /* ---- 통계 합산 (내 기기 + 다른 기기 버킷) ---- */
 function remoteBuckets() {
-  return Object.values(JSON.parse(localStorage.getItem("ec_remote") || "{}"));
+  return Object.values(JSON.parse(localStorage.getItem(pk("ec_remote")) || "{}"));
 }
 
 function aggDaily() {
@@ -803,7 +884,7 @@ function aggDaily() {
       out[k] = t;
     }
   };
-  add(JSON.parse(localStorage.getItem("ec_daily") || "{}"));
+  add(JSON.parse(localStorage.getItem(pk("ec_daily")) || "{}"));
   remoteBuckets().forEach((b) => add(b.daily));
   return out;
 }
@@ -818,19 +899,19 @@ function aggPhonemes() {
       out[p] = t;
     }
   };
-  add(JSON.parse(localStorage.getItem("ec_phonemes") || "{}"));
+  add(JSON.parse(localStorage.getItem(pk("ec_phonemes")) || "{}"));
   remoteBuckets().forEach((b) => add(b.phonemes));
   return out;
 }
 
 function aggHistory() {
-  let all = JSON.parse(localStorage.getItem("ec_history") || "[]");
+  let all = JSON.parse(localStorage.getItem(pk("ec_history")) || "[]");
   remoteBuckets().forEach((b) => { all = all.concat(b.history || []); });
   return mergeById(all, [], (h) => h.d + "|" + h.t).sort((a, b) => b.d.localeCompare(a.d)).slice(0, 50);
 }
 
 function aggSessions() {
-  let all = JSON.parse(localStorage.getItem("ec_sessions") || "[]");
+  let all = JSON.parse(localStorage.getItem(pk("ec_sessions")) || "[]");
   remoteBuckets().forEach((b) => { all = all.concat(b.sessions || []); });
   return mergeById(all, [], (s) => s.d + "|" + s.topic + "|" + s.sec).sort((a, b) => b.d.localeCompare(a.d)).slice(0, 50);
 }
@@ -838,14 +919,32 @@ function aggSessions() {
 /* ================================================================
    💬 회화 수업 — Gemini Live API (브라우저 → WebSocket 직접 연결)
    ================================================================ */
-const TOPICS = [
-  { key: "free", label: "자유 대화", en: "free conversation — anything on the student's mind" },
-  { key: "day", label: "오늘 하루", en: "how the student's day went" },
-  { key: "travel", label: "여행", en: "travel experiences and plans" },
-  { key: "hospital", label: "병원·검사실 상황", en: "workplace situations in a hospital clinical laboratory" },
-  { key: "conference", label: "학회 스몰토크", en: "small talk at an international medical conference" },
-  { key: "research", label: "내 연구 설명하기", en: "explaining the student's research in simple English" },
-];
+const TOPICS_BY_LEVEL = {
+  beginner: [
+    { key: "free", label: "자유 대화", en: "free conversation — anything fun the student wants to talk about" },
+    { key: "school", label: "학교 생활", en: "school life — classes, teachers, and friends" },
+    { key: "family", label: "가족·반려동물", en: "family and pets" },
+    { key: "hobby", label: "취미·게임", en: "hobbies, games, and favorite things" },
+    { key: "food", label: "좋아하는 음식", en: "favorite food and snacks" },
+  ],
+  intermediate: [
+    { key: "free", label: "자유 대화", en: "free conversation — anything on the student's mind" },
+    { key: "day", label: "오늘 하루", en: "how the student's day went" },
+    { key: "school", label: "학교 생활", en: "school life — classes, clubs, and friends" },
+    { key: "hobby", label: "취미·연예", en: "hobbies, music, games, and entertainment" },
+    { key: "travel", label: "여행", en: "travel experiences and plans" },
+    { key: "dream", label: "장래 희망", en: "future dreams and jobs" },
+  ],
+  advanced: [
+    { key: "free", label: "자유 대화", en: "free conversation — anything on the student's mind" },
+    { key: "day", label: "오늘 하루", en: "how the student's day went" },
+    { key: "travel", label: "여행", en: "travel experiences and plans" },
+    { key: "hospital", label: "병원·검사실 상황", en: "workplace situations in a hospital clinical laboratory" },
+    { key: "conference", label: "학회 스몰토크", en: "small talk at an international medical conference" },
+    { key: "research", label: "내 연구 설명하기", en: "explaining the student's research in simple English" },
+  ],
+};
+function topicsFor() { return TOPICS_BY_LEVEL[levelOf()] || TOPICS_BY_LEVEL.advanced; }
 
 // ListModels(bidiGenerateContent 지원) 조회 결과 기준 (2026-07)
 const LIVE_MODELS = [
@@ -855,11 +954,31 @@ const LIVE_MODELS = [
 ];
 
 function personaPrompt(topicEn) {
+  const p = activeProfile() || {};
+  const lv = levelOf();
+  let student, style;
+  if (lv === "beginner") {
+    student = "a young Korean student who is just starting English";
+    style = `- Speak SLOWLY and very clearly. Use only easy, common words and short sentences.
+- Keep each turn to 1-2 short sentences, then ask ONE easy question.
+- Be cheerful and playful. Praise often ("Great job!"). If the student is stuck, offer two easy choices (e.g., "Pizza or chicken?").`;
+  } else if (lv === "intermediate") {
+    student = "a Korean teenage student with basic conversational English";
+    style = `- Speak clearly at a slightly slow pace, using everyday vocabulary.
+- Keep each turn SHORT (2-3 sentences) and end with a question. The student should talk more than you.
+- Be encouraging and friendly, like a cool older mentor.`;
+  } else {
+    student = p.isParent
+      ? "a Korean medical school professor with upper-intermediate English"
+      : "a Korean adult learner with upper-intermediate English";
+    style = `- Speak naturally and warmly, at a normal pace with clear articulation.
+- Keep each turn SHORT (2-4 sentences) and end with a question. The student should talk more than you.`;
+  }
   return `You are Emma, a friendly professional American English conversation teacher.
-Your student is a Korean medical school professor with upper-intermediate English.
+Your student is ${student}${p.name ? ` (the student's name is "${p.name}")` : ""}.
 Rules:
-- Speak only English, naturally and warmly, at a normal pace with clear articulation.
-- Keep each turn SHORT (2-4 sentences) and end with a question. The student should talk more than you.
+- Speak only English.
+${style}
 - When the student makes a grammar or word-choice mistake, briefly recast it naturally ("Oh, you mean ...") and move on. Never lecture.
 - Occasionally teach ONE useful natural expression related to the topic.
 - If the student is silent or struggling, encourage them and ask a simpler question.
@@ -940,7 +1059,7 @@ class MicStreamer {
 const conv = {
   ws: null, mic: null, player: null,
   connected: false, setupDone: false, intentional: false,
-  topic: TOPICS[0], modelIdx: 0, failReasons: [],
+  topic: null, modelIdx: 0, failReasons: [],
   timerId: null, startAt: 0,
   transcript: [],           // [{role:'user'|'teacher', text}]
 };
@@ -954,7 +1073,9 @@ function convStatus(msg, cls) {
 function renderTopics() {
   const box = $("#topics");
   box.innerHTML = "";
-  for (const t of TOPICS) {
+  const topics = topicsFor();
+  if (!conv.topic || !topics.some((t) => t.key === conv.topic.key)) conv.topic = topics[0];
+  for (const t of topics) {
     const b = document.createElement("button");
     b.className = "tab" + (conv.topic.key === t.key ? " active" : "");
     b.textContent = t.label;
@@ -1112,13 +1233,13 @@ function endLessonCleanup() {
   if (conv.connected && conv.startAt) {
     const sec = Math.round((Date.now() - conv.startAt) / 1000);
     if (sec >= 10) {
-      const sessions = JSON.parse(localStorage.getItem("ec_sessions") || "[]");
+      const sessions = JSON.parse(localStorage.getItem(pk("ec_sessions")) || "[]");
       sessions.unshift({
         d: new Date().toISOString().slice(0, 16).replace("T", " "),
         topic: conv.topic.label,
         sec,
       });
-      localStorage.setItem("ec_sessions", JSON.stringify(sessions.slice(0, 50)));
+      localStorage.setItem(pk("ec_sessions"), JSON.stringify(sessions.slice(0, 50)));
       bumpDaily({ convSec: sec });
       scheduleSync();
     }
@@ -1152,8 +1273,10 @@ async function makeReport() {
   $("#reportCard").classList.remove("hidden");
   $("#reportBody").textContent = "리포트 생성 중...";
 
-  const prompt = `다음은 한국인 학습자(Student)와 영어 선생님(Teacher)의 영어 회화 수업 대화록입니다.
-학습자의 영어를 분석해서 아래 JSON 형식으로만 응답하세요:
+  const lvKo = { beginner: "초급 (어린 학생)", intermediate: "중급 (중고생)", advanced: "상급 (성인)" }[levelOf()];
+  const prompt = `다음은 한국인 학습자(Student, 수준: ${lvKo})와 영어 선생님(Teacher)의 영어 회화 수업 대화록입니다.
+학습자의 영어를 분석해서 아래 JSON 형식으로만 응답하세요.
+교정은 학습자 수준에 맞추세요 — 초급이면 아주 기초적인 것 위주로, 이유(reason)는 그 나이대가 이해할 수 있는 쉬운 한국어로:
 
 {
   "report": "한국어 마크다운 리포트. 형식: ## 교정이 필요한 문장 (3~5개)\\n- ❌ 원문 → ✅ 자연스러운 표현 — 이유 한 줄\\n## 잘한 표현 (1~2개)\\n## 다음 수업 연습 포인트 (1개)",
@@ -1206,9 +1329,9 @@ ${turns}`;
       html += `<p class="bank-note">🗂 오답 은행에 ${added}문장 추가됨 — 🔤 발음 연습의 <b>오답 복습</b> 탭에서 "고쳐 말하기" 훈련을 해보세요!</p>`;
     }
     $("#reportBody").innerHTML = html;
-    const reports = JSON.parse(localStorage.getItem("ec_reports") || "[]");
+    const reports = JSON.parse(localStorage.getItem(pk("ec_reports")) || "[]");
     reports.unshift({ d: new Date().toISOString().slice(0, 16).replace("T", " "), topic: conv.topic.label, report: reportMd });
-    localStorage.setItem("ec_reports", JSON.stringify(reports.slice(0, 20)));
+    localStorage.setItem(pk("ec_reports"), JSON.stringify(reports.slice(0, 20)));
     scheduleSync();
   } catch (e) {
     $("#reportBody").textContent = "❌ " + e.message;
@@ -1344,16 +1467,328 @@ function renderDash() {
         `<div class="h-item"><span class="txt">${escapeHtml(s.topic)}</span><span>${s.d.slice(5)}</span><span class="sc">${fmtDuration(s.sec)}</span></div>`
       ).join("")
     : `<p class="dash-empty">아직 수업 기록이 없습니다.</p>`;
+
+  // ── 가족 학습 현황 (부모 프로필만)
+  renderFamily();
+}
+
+/* ---- 가족 학습 현황 (부모 대시보드) ---- */
+function renderFamily() {
+  const me = activeProfile();
+  const sec = $("#familySection");
+  const others = me ? getProfiles().filter((p) => p.id !== me.id) : [];
+  if (!me || !me.isParent || !others.length) { sec.classList.add("hidden"); return; }
+  sec.classList.remove("hidden");
+  const fam = JSON.parse(localStorage.getItem("ec_family") || "{}");
+  const board = $("#familyBoard");
+  board.innerHTML = "";
+  for (const p of others) {
+    const P = fam[p.id] || {};
+    // 이 프로필의 모든 기기 버킷 합산
+    const daily = {};
+    for (const b of Object.values(P.devices || {})) {
+      for (const [k, d] of Object.entries(b.daily || {})) {
+        const t = daily[k] || { n: 0, pronSum: 0, best: 0, convSec: 0 };
+        t.n += d.n || 0;
+        t.pronSum += d.pronSum || 0;
+        t.convSec += d.convSec || 0;
+        daily[k] = t;
+      }
+    }
+    let wn = 0, wsum = 0, wconv = 0;
+    for (let i = 0; i < 7; i++) {
+      const dt = new Date();
+      dt.setDate(dt.getDate() - i);
+      const d = daily[dt.toISOString().slice(0, 10)];
+      if (d) { wn += d.n; wsum += d.pronSum; wconv += d.convSec; }
+    }
+    const dates = Object.keys(daily).sort();
+    const last = dates.length ? dates[dates.length - 1] : null;
+    const bank = (P.shared || {}).wrongbank || [];
+    const grad = bank.filter((b) => b.grad).length;
+    const card = document.createElement("div");
+    card.className = "family-card";
+    card.innerHTML =
+      `<div class="f-head"><span class="p-emoji">${p.emoji || "👤"}</span><b>${escapeHtml(p.name)}</b>` +
+      `<span class="p-level">${LEVEL_LABELS[p.level] || "🎯 레벨 미정"}</span></div>` +
+      `<div class="f-stats">` +
+      `<span>이번 주 채점 <b>${wn}회</b></span>` +
+      `<span>주간 평균 <b>${wn ? Math.round(wsum / wn) + "점" : "-"}</b></span>` +
+      `<span>주간 수업 <b>${wconv ? fmtDuration(wconv) : "-"}</b></span>` +
+      `<span>연속 학습 <b>${calcStreak(daily)}일</b></span>` +
+      `<span>오답 졸업 <b>${bank.length ? grad + "/" + bank.length : "-"}</b></span>` +
+      `<span>마지막 학습 <b>${last ? last.slice(5).replace("-", "/") : "아직 없음"}</b></span>` +
+      `</div>`;
+    board.appendChild(card);
+  }
+}
+
+/* ================================================================
+   👨‍👩‍👧‍👦 프로필 UI — 선택 화면 · 추가 · 전환
+   ================================================================ */
+function renderProfileChip() {
+  const p = activeProfile();
+  const btn = $("#btnProfile");
+  if (!p) { btn.classList.add("hidden"); return; }
+  btn.textContent = `${p.emoji || "👤"} ${p.name}`;
+  btn.classList.remove("hidden");
+}
+
+function renderCfgProfileRow() {
+  const p = activeProfile();
+  const row = $("#cfgProfileRow");
+  if (!p) { row.classList.add("hidden"); return; }
+  $("#cfgProfileInfo").innerHTML =
+    `${p.emoji || "👤"} <b>${escapeHtml(p.name)}</b> — ${LEVEL_LABELS[p.level] || "🎯 레벨 미정"}` +
+    (p.levelScore ? ` <span class="sub">(테스트 ${p.levelScore}점)</span>` : "");
+  row.classList.remove("hidden");
+}
+
+function renderProfileOverlay() {
+  const list = $("#profileList");
+  list.innerHTML = "";
+  const ps = getProfiles();
+  if (!ps.length) {
+    list.innerHTML = `<p class="hint">아직 프로필이 없습니다. ➕ 프로필 추가로 시작하세요.</p>`;
+  }
+  for (const p of ps) {
+    const card = document.createElement("div");
+    card.className = "profile-card" + (p.id === state.profileId ? " active" : "");
+    card.innerHTML =
+      `<span class="p-emoji">${p.emoji || "👤"}</span>` +
+      `<span class="p-name">${escapeHtml(p.name)}${p.isParent ? ' <span class="p-parent">부모</span>' : ""}</span>` +
+      `<span class="p-level">${LEVEL_LABELS[p.level] || "🎯 레벨 미정"}</span>` +
+      `<button class="p-del" title="프로필 삭제">✕</button>`;
+    card.onclick = () => selectProfile(p.id);
+    card.querySelector(".p-del").onclick = (e) => {
+      e.stopPropagation();
+      if (!confirm(`"${p.name}" 프로필을 삭제할까요?\n이 프로필의 학습 기록도 함께 삭제됩니다 (모든 기기에 전파).`)) return;
+      deleteProfile(p.id);
+    };
+    list.appendChild(card);
+  }
+  $("#profileAddForm").classList.add("hidden");
+  $("#profileActions").classList.remove("hidden");
+  $("#profileOverlay").classList.remove("hidden");
+}
+
+function deleteProfile(pid) {
+  setProfiles(getProfiles().filter((x) => x.id !== pid));
+  const dead = JSON.parse(localStorage.getItem("ec_dead_profiles") || "[]");
+  if (!dead.includes(pid)) dead.push(pid);
+  localStorage.setItem("ec_dead_profiles", JSON.stringify(dead));
+  for (const k of DATA_KEYS) localStorage.removeItem(k + "." + pid);
+  if (state.profileId === pid) { state.profileId = ""; localStorage.removeItem("ec_active"); }
+  scheduleSync();
+  renderProfileOverlay();
+}
+
+async function selectProfile(pid) {
+  if (state.entered) {
+    if (pid === state.profileId) { $("#profileOverlay").classList.add("hidden"); return; }
+    // 현재 프로필의 미동기화 데이터를 올린 뒤 전환 (토큰 있을 때만)
+    const cfg = JSON.parse(localStorage.getItem("ec_cfg") || "{}");
+    if (cfg.githubToken) { try { await syncNow(true); } catch {} }
+    localStorage.setItem("ec_active", pid);
+    location.reload();
+    return;
+  }
+  state.profileId = pid;
+  localStorage.setItem("ec_active", pid);
+  $("#profileOverlay").classList.add("hidden");
+  enterApp();
+}
+
+function renderEmojiRow() {
+  const row = $("#npEmojis");
+  row.innerHTML = "";
+  PROFILE_EMOJIS.forEach((em, i) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "emoji-btn" + (i === 0 ? " active" : "");
+    b.textContent = em;
+    b.onclick = () => {
+      row.querySelectorAll(".emoji-btn").forEach((x) => x.classList.remove("active"));
+      b.classList.add("active");
+    };
+    row.appendChild(b);
+  });
+}
+
+function createProfile() {
+  const name = $("#npName").value.trim();
+  if (!name) { $("#npName").focus(); return; }
+  const sel = $("#npEmojis .emoji-btn.active");
+  const p = {
+    id: "p" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
+    name,
+    emoji: sel ? sel.textContent : "👤",
+    isParent: false,
+    level: null,
+    updated: Date.now(),
+  };
+  setProfiles([...getProfiles(), p]);
+  $("#npName").value = "";
+  scheduleSync();
+  selectProfile(p.id); // 새 프로필로 바로 입장 → 레벨 미정이면 레벨 테스트 안내
+}
+
+/* ================================================================
+   🎯 레벨 테스트 — 6문장 읽기 → 평균 점수로 자동 배치
+   ================================================================ */
+const lt = { idx: 0, scores: [], recording: false, rec: null, timerId: null };
+
+function openLevelTest() {
+  lt.idx = 0;
+  lt.scores = [];
+  lt.recording = false;
+  const p = activeProfile();
+  $("#ltFor").textContent = p ? `${p.emoji || ""} ${p.name}` : "";
+  $("#ltResult").classList.add("hidden");
+  $("#ltManual").classList.add("hidden");
+  $("#ltRec").classList.remove("hidden", "recording", "busy");
+  $("#levelModal").classList.remove("hidden");
+  if (!state.azureKey) {
+    $("#ltProgress").innerHTML = "";
+    $("#ltSentence").textContent = "Azure 키가 아직 없어 자동 채점을 할 수 없어요.";
+    $("#ltStatus").textContent = "아래 [테스트 없이 직접 선택]에서 레벨을 골라주세요";
+    $("#ltRec").classList.add("hidden");
+    $("#ltManual").classList.remove("hidden");
+    return;
+  }
+  ltRender();
+}
+
+function ltRender() {
+  $("#ltProgress").innerHTML = LEVEL_TEST_SENTENCES.map((_, i) =>
+    `<span class="lt-dot${i < lt.idx ? " done" : i === lt.idx ? " cur" : ""}"></span>`
+  ).join("");
+  $("#ltSentence").textContent = LEVEL_TEST_SENTENCES[lt.idx].text;
+  $("#ltStatus").textContent = `${lt.idx + 1} / ${LEVEL_TEST_SENTENCES.length} — 버튼을 누르고 문장을 읽어주세요`;
+}
+
+async function ltToggle() {
+  if (lt.recording) return ltStop();
+  try {
+    lt.rec = new WavRecorder();
+    await lt.rec.start(() => {});
+  } catch (e) {
+    $("#ltStatus").textContent = "❌ 마이크 접근 실패: " + e.message;
+    return;
+  }
+  lt.recording = true;
+  $("#ltRec").classList.add("recording");
+  $("#ltStatus").textContent = "🔴 녹음 중... 다 읽으면 버튼을 다시 누르세요";
+  clearTimeout(lt.timerId);
+  lt.timerId = setTimeout(ltStop, MAX_REC_SEC * 1000);
+}
+
+async function ltStop() {
+  clearTimeout(lt.timerId);
+  lt.recording = false;
+  $("#ltRec").classList.remove("recording");
+  $("#ltRec").classList.add("busy");
+  $("#ltStatus").textContent = "채점 중...";
+  try {
+    const wav = await lt.rec.stop();
+    const data = await assessWithSDK(wav, LEVEL_TEST_SENTENCES[lt.idx].text);
+    if (!data.ok || data.pron == null) {
+      $("#ltStatus").textContent = "🔇 음성이 잘 안 들렸어요. 같은 문장을 다시 읽어주세요.";
+      return;
+    }
+    lt.scores.push(data.pron);
+    lt.idx += 1;
+    if (lt.idx >= LEVEL_TEST_SENTENCES.length) {
+      ltFinish();
+    } else {
+      ltRender();
+      $("#ltStatus").textContent = `👍 ${Math.round(data.pron)}점! 다음 문장이에요 (${lt.idx + 1}/${LEVEL_TEST_SENTENCES.length})`;
+    }
+  } catch (e) {
+    $("#ltStatus").textContent = "❌ " + e.message;
+  } finally {
+    $("#ltRec").classList.remove("busy");
+  }
+}
+
+function ltAssign(level, score) {
+  const ps = getProfiles();
+  const p = ps.find((x) => x.id === state.profileId);
+  if (p) {
+    p.level = level;
+    p.levelScore = score != null ? score : undefined;
+    p.levelDate = new Date().toISOString().slice(0, 10);
+    p.updated = Date.now();
+    setProfiles(ps);
+  }
+  scheduleSync();
+  applyLevelToUI();
+}
+
+function ltFinish() {
+  const avg = Math.round(lt.scores.reduce((a, b) => a + b, 0) / lt.scores.length);
+  const level = avg >= LEVEL_THRESHOLDS.advanced ? "advanced"
+    : avg >= LEVEL_THRESHOLDS.intermediate ? "intermediate" : "beginner";
+  ltAssign(level, avg);
+  $("#ltProgress").innerHTML = "";
+  $("#ltSentence").textContent = "";
+  $("#ltStatus").textContent = "";
+  $("#ltRec").classList.add("hidden");
+  const el = $("#ltResult");
+  el.innerHTML =
+    `<div class="lt-score">평균 ${avg}점</div>` +
+    `<div class="lt-level">${LEVEL_LABELS[level]}</div>` +
+    `<p class="hint">이 레벨에 맞는 연습 문장과 회화 선생님으로 설정했어요.<br>실력이 늘면 ⚙️ 설정에서 다시 테스트할 수 있어요.</p>`;
+  el.classList.remove("hidden");
+}
+
+/* ---- 레벨/프로필 변경 시 UI 재구성 ---- */
+function applyLevelToUI() {
+  const bank = SENTENCES_BY_LEVEL[levelOf()] || SENTENCES_BY_LEVEL.advanced;
+  if (!(state.category in bank) && !["review", "custom"].includes(state.category)) {
+    state.category = "daily";
+  }
+  state.idx = 0;
+  renderTabs();
+  renderSentence();
+  conv.topic = null; // 레벨에 맞는 토픽으로 재설정
+  renderTopics();
+  renderProfileChip();
+  renderCfgProfileRow();
 }
 
 /* ---------- 초기화 ---------- */
-function init() {
+function bootProfiles() {
+  let ps = getProfiles();
+  if (!ps.length) {
+    const legacy = DATA_KEYS.some((k) => localStorage.getItem(k) != null);
+    if (legacy) {
+      // 기존 단일 사용자 데이터 → 부모 프로필로 이관 후 그대로 입장
+      const parent = { id: "p" + Date.now().toString(36), name: "부모", emoji: "🧑‍⚕️", isParent: true, level: "advanced", updated: Date.now() };
+      setProfiles([parent]);
+      migrateLegacyToProfile(parent.id);
+      localStorage.setItem("ec_active", parent.id);
+      ps = [parent];
+    }
+  }
+  const act = localStorage.getItem("ec_active");
+  if (act && ps.some((p) => p.id === act)) {
+    state.profileId = act;
+    enterApp();
+  } else {
+    renderProfileOverlay(); // 프로필 선택/생성 (새 기기는 토큰 입력 → 동기화로 가족 프로필 로드)
+  }
+}
+
+function enterApp() {
+  state.entered = true;
   renderTabs();
   renderSentence();
   renderHistory();
   renderWeakPhonemes();
   renderBank();
-  loadConfig();
+  renderProfileChip();
+  renderCfgProfileRow();
   $("#btnShowAnswer").onclick = () => $("#answerText").classList.toggle("hidden");
 
   $("#btnRec").onclick = toggleRecord;
@@ -1365,17 +1800,6 @@ function init() {
     state.customSentence = $("#customText").value.trim().replace(/\s+/g, " ");
     renderSentence();
   };
-  $("#btnSettings").onclick = () => $("#modal").classList.remove("hidden");
-  $("#bannerOpen").onclick = () => $("#modal").classList.remove("hidden");
-  $("#cfgClose").onclick = () => $("#modal").classList.add("hidden");
-  $("#cfgSave").onclick = saveConfig;
-  $("#cfgTest").onclick = testConfig;
-  $("#modal").onclick = (e) => { if (e.target === $("#modal")) $("#modal").classList.add("hidden"); };
-
-  // 동기화
-  $("#btnSync").onclick = () => syncNow(false);
-  $("#cfgSyncNow").onclick = () => syncNow(false);
-  setTimeout(() => syncNow(true), 2000); // 앱 시작 시 자동 동기화 (토큰 있을 때만)
 
   // 회화 수업
   renderTopics();
@@ -1385,6 +1809,53 @@ function init() {
   $("#btnConnect").onclick = startLesson;
   $("#btnEndReport").onclick = makeReport;
   window.addEventListener("beforeunload", () => { if (conv.connected) stopLesson(); });
+
+  // 레벨 미정 프로필 → 첫 진입 시 레벨 테스트 안내
+  const p = activeProfile();
+  if (p && !p.level) setTimeout(openLevelTest, 400);
+}
+
+function init() {
+  loadConfig();
+
+  // 설정 모달 (프로필 선택 전에도 동작 — 새 기기에서 토큰 먼저 입력 가능)
+  $("#btnSettings").onclick = () => $("#modal").classList.remove("hidden");
+  $("#bannerOpen").onclick = () => $("#modal").classList.remove("hidden");
+  $("#cfgClose").onclick = () => $("#modal").classList.add("hidden");
+  $("#cfgSave").onclick = saveConfig;
+  $("#cfgTest").onclick = testConfig;
+  $("#modal").onclick = (e) => { if (e.target === $("#modal")) $("#modal").classList.add("hidden"); };
+  $("#cfgLevelTest").onclick = () => { $("#modal").classList.add("hidden"); openLevelTest(); };
+
+  // 동기화
+  $("#btnSync").onclick = () => syncNow(false);
+  $("#cfgSyncNow").onclick = () => syncNow(false);
+  setTimeout(() => syncNow(true), 2000); // 앱 시작 시 자동 동기화 (토큰 있을 때만)
+
+  // 프로필 오버레이
+  renderEmojiRow();
+  $("#btnProfile").onclick = () => renderProfileOverlay();
+  $("#btnAddProfile").onclick = () => {
+    $("#profileAddForm").classList.remove("hidden");
+    $("#profileActions").classList.add("hidden");
+    $("#npName").focus();
+  };
+  $("#npCancel").onclick = () => {
+    $("#profileAddForm").classList.add("hidden");
+    $("#profileActions").classList.remove("hidden");
+  };
+  $("#npCreate").onclick = createProfile;
+  $("#btnOverlaySettings").onclick = () => $("#modal").classList.remove("hidden");
+
+  // 레벨 테스트
+  $("#ltRec").onclick = ltToggle;
+  $("#ltSkip").onclick = () => $("#ltManual").classList.toggle("hidden");
+  $("#ltClose").onclick = () => $("#levelModal").classList.add("hidden");
+  document.querySelectorAll(".lt-lv").forEach((b) => {
+    b.onclick = () => { ltAssign(b.dataset.lv, null); $("#levelModal").classList.add("hidden"); };
+  });
+
+  bootProfiles();
 }
 
 init();
