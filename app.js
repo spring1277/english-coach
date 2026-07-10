@@ -465,6 +465,21 @@ function setStatus(msg) { $("#recStatus").textContent = msg; }
 /* ---------- 결과 렌더링 ---------- */
 function scoreClass(v) { return v == null ? "" : v >= 80 ? "good" : v >= 60 ? "mid" : "bad"; }
 
+function countUp(el, target) {
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  const dur = 600, t0 = performance.now();
+  const tick = (t) => {
+    const k = Math.min(1, (t - t0) / dur);
+    el.textContent = Math.round(target * (1 - Math.pow(1 - k, 3)));
+    if (k < 1) requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+}
+
+function reactionFor(pron) {
+  return pron >= 90 ? "🏆 Amazing!" : pron >= 80 ? "🎉 Great job!" : pron >= 60 ? "💪 Good try!" : "🌱 Keep going!";
+}
+
 function renderResult(data, refText) {
   const scores = $("#scores");
   scores.innerHTML = "";
@@ -481,6 +496,13 @@ function renderResult(data, refText) {
     div.className = "score-chip" + (main ? " main" : "");
     div.innerHTML = `<div class="val c-${scoreClass(val)}">${Math.round(val)}</div><div class="lbl">${lbl}</div>`;
     scores.appendChild(div);
+    if (main) countUp(div.querySelector(".val"), Math.round(val));
+  }
+  if (data.pron != null) {
+    const r = document.createElement("div");
+    r.className = "reaction";
+    r.textContent = reactionFor(data.pron);
+    scores.appendChild(r);
   }
 
   const box = $("#wordsBox");
@@ -1437,11 +1459,12 @@ function renderDash() {
     totalSum += d.pronSum || 0;
     totalConv += d.convSec || 0;
   }
+  const streak = calcStreak(daily);
   const tiles = [
     { v: totalN, l: "발음 채점 횟수" },
     { v: totalN ? Math.round(totalSum / totalN) : "-", l: "평균 총점" },
     { v: fmtDuration(totalConv), l: "누적 수업 시간" },
-    { v: calcStreak(daily) + "일", l: "연속 학습" },
+    { v: (streak > 0 ? "🔥 " : "") + streak + "일", l: "연속 학습" },
   ];
   $("#dashTiles").innerHTML = tiles.map((t) =>
     `<div class="tile"><div class="tile-v">${t.v}</div><div class="tile-l">${t.l}</div></div>`
@@ -1465,22 +1488,24 @@ function renderDash() {
     const W = 700, H = 190, padL = 34, padB = 24, padT = 14;
     const bw = (W - padL - 10) / 14;
     let svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="최근 14일 일평균 발음 점수">`;
+    svg += `<defs><linearGradient id="barGrad" x1="0" y1="1" x2="0" y2="0">` +
+      `<stop offset="0" stop-color="#8b7cff"/><stop offset="1" stop-color="#38d6f5"/></linearGradient></defs>`;
     // 그리드 (0/50/100) — 눈에 띄지 않게
     for (const gv of [0, 50, 100]) {
       const y = padT + (H - padT - padB) * (1 - gv / 100);
-      svg += `<line x1="${padL}" y1="${y}" x2="${W - 6}" y2="${y}" stroke="#33405e" stroke-width="1"/>`;
-      svg += `<text x="${padL - 6}" y="${y + 4}" text-anchor="end" font-size="11" fill="#8b95ab">${gv}</text>`;
+      svg += `<line x1="${padL}" y1="${y}" x2="${W - 6}" y2="${y}" stroke="#2b3760" stroke-width="1"/>`;
+      svg += `<text x="${padL - 6}" y="${y + 4}" text-anchor="end" font-size="11" fill="#8c97bd">${gv}</text>`;
     }
     days.forEach((d, i) => {
       const x = padL + i * bw + bw * 0.22;
       if (d.avg != null) {
         const h = (H - padT - padB) * (d.avg / 100);
         const y = H - padB - h;
-        svg += `<rect x="${x}" y="${y}" width="${bw * 0.56}" height="${Math.max(h, 2)}" rx="3" fill="#4f8cff"><title>${d.label} — 평균 ${d.avg}점</title></rect>`;
-        svg += `<text x="${x + bw * 0.28}" y="${y - 5}" text-anchor="middle" font-size="11" fill="#e8ecf5">${d.avg}</text>`;
+        svg += `<rect x="${x}" y="${y}" width="${bw * 0.56}" height="${Math.max(h, 2)}" rx="3" fill="url(#barGrad)"><title>${d.label} — 평균 ${d.avg}점</title></rect>`;
+        svg += `<text x="${x + bw * 0.28}" y="${y - 5}" text-anchor="middle" font-size="11" fill="#ecf1ff">${d.avg}</text>`;
       }
       if (i % 2 === 1) {
-        svg += `<text x="${x + bw * 0.28}" y="${H - 7}" text-anchor="middle" font-size="10.5" fill="#8b95ab">${d.label}</text>`;
+        svg += `<text x="${x + bw * 0.28}" y="${H - 7}" text-anchor="middle" font-size="10.5" fill="#8c97bd">${d.label}</text>`;
       }
     });
     svg += "</svg>";
