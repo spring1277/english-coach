@@ -765,12 +765,46 @@ async function syncNow(silent) {
     for (const pid of deadP) delete cloud.profiles[pid];
 
     // 2) 프로필 목록 병합 (id 기준, updated 최신 승리) — 기기 간 프로필 공유
-    const ps = getProfiles().filter((p) => !deadP.includes(p.id));
+    let ps = getProfiles().filter((p) => !deadP.includes(p.id));
     for (const [pid, P] of Object.entries(cloud.profiles)) {
       if (!P.meta) continue;
       const local = ps.find((p) => p.id === pid);
       if (!local) ps.push({ ...P.meta, id: pid });
       else if ((P.meta.updated || 0) > (local.updated || 0)) Object.assign(local, P.meta, { id: pid });
+    }
+
+    // 2.5) 부모 프로필 중복 통합 — 기기마다 레거시 이관으로 부모가 여럿 생긴 경우
+    //      가장 작은 id를 대표로 삼아 데이터(기기 버킷·오답은행·리포트)를 합치고 나머지는 제거.
+    //      묘비를 쓰지 않아도 모든 기기가 같은 규칙으로 수렴한다 (멱등).
+    const parents = ps.filter((p) => p.isParent).sort((a, b) => String(a.id).localeCompare(String(b.id)));
+    for (const dup of parents.slice(1)) {
+      const canon = parents[0];
+      const src = cloud.profiles[dup.id];
+      const dst = (cloud.profiles[canon.id] = cloud.profiles[canon.id] || { meta: { ...canon }, devices: {}, shared: {} });
+      if (src) {
+        dst.devices = { ...(src.devices || {}), ...(dst.devices || {}) };
+        dst.shared = dst.shared || {};
+        const ssh = src.shared || {};
+        dst.shared.wrongbank = mergeById(dst.shared.wrongbank, ssh.wrongbank, (b) => b.id, (x, y) => ({
+          ...x,
+          drill: Math.max(x.drill || 0, y.drill || 0),
+          grad: !!(x.grad || y.grad),
+        })).slice(0, 100);
+        dst.shared.reports = mergeById(dst.shared.reports, ssh.reports, (r) => r.d + "|" + r.topic).slice(0, 20);
+        dst.shared.deleted = [...new Set([...(dst.shared.deleted || []), ...(ssh.deleted || [])])].slice(-200);
+        delete cloud.profiles[dup.id];
+      }
+      // 이 기기가 중복 부모를 쓰고 있었다면 로컬 데이터·활성 프로필을 대표 부모로 이관
+      for (const k of DATA_KEYS) {
+        const v = localStorage.getItem(k + "." + dup.id);
+        if (v != null && localStorage.getItem(k + "." + canon.id) == null) localStorage.setItem(k + "." + canon.id, v);
+        localStorage.removeItem(k + "." + dup.id);
+      }
+      if (state.profileId === dup.id) {
+        state.profileId = canon.id;
+        localStorage.setItem("ec_active", canon.id);
+      }
+      ps = ps.filter((p) => p.id !== dup.id);
     }
     setProfiles(ps);
     for (const p of ps) {
@@ -1264,6 +1298,15 @@ function stopLesson(statusMsg) {
   convStatus(statusMsg || "대기 중", "");
 }
 
+/* ---- 리포트 마크다운 → HTML (생성 직후 + 통계 탭 열람 공용) ---- */
+function reportHtml(md) {
+  return String(md)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;")
+    .replace(/^## (.+)$/gm, "<h3>$1</h3>")
+    .replace(/\*\*(.+?)\*\*/g, "<b>$1</b>")
+    .replace(/\n/g, "<br>");
+}
+
 /* ---- 수업 종료 리포트 (Gemini REST, 무료 티어, 혼잡 시 모델 폴백) ---- */
 async function makeReport() {
   const turns = conv.transcript.map((t) => (t.role === "user" ? "Student: " : "Teacher: ") + t.text).join("\n");
@@ -1318,11 +1361,7 @@ ${turns}`;
     let parsed = null;
     try { parsed = JSON.parse(raw); } catch { /* JSON 실패 시 원문 그대로 표시 */ }
     const reportMd = (parsed && parsed.report) ? parsed.report : raw;
-    let html = reportMd
-      .replace(/&/g, "&amp;").replace(/</g, "&lt;")
-      .replace(/^## (.+)$/gm, "<h3>$1</h3>")
-      .replace(/\*\*(.+?)\*\*/g, "<b>$1</b>")
-      .replace(/\n/g, "<br>");
+    let html = reportHtml(reportMd);
     // 교정 문장 → 오답 은행 자동 저장
     const added = parsed ? addToBank(parsed.corrections, conv.topic.label) : 0;
     if (added > 0) {
@@ -1467,6 +1506,16 @@ function renderDash() {
         `<div class="h-item"><span class="txt">${escapeHtml(s.topic)}</span><span>${s.d.slice(5)}</span><span class="sc">${fmtDuration(s.sec)}</span></div>`
       ).join("")
     : `<p class="dash-empty">아직 수업 기록이 없습니다.</p>`;
+
+  // ── 수업 리포트 열람 (다른 기기에서 만든 것도 동기화 후 표시)
+  const reps = JSON.parse(localStorage.getItem(pk("ec_reports")) || "[]");
+  $("#dashReports").innerHTML = reps.length
+    ? reps.map((r, i) =>
+        `<details class="report-item"${i === 0 ? " open" : ""}>` +
+        `<summary>💬 ${escapeHtml(r.topic)} <span class="sub">${escapeHtml(r.d)}</span></summary>` +
+        `<div class="report">${reportHtml(r.report)}</div></details>`
+      ).join("")
+    : `<p class="dash-empty">아직 리포트가 없습니다. 💬 회화 수업 후 📋 버튼으로 만들 수 있어요.</p>`;
 
   // ── 가족 학습 현황 (부모 프로필만)
   renderFamily();
@@ -1764,7 +1813,8 @@ function bootProfiles() {
     const legacy = DATA_KEYS.some((k) => localStorage.getItem(k) != null);
     if (legacy) {
       // 기존 단일 사용자 데이터 → 부모 프로필로 이관 후 그대로 입장
-      const parent = { id: "p" + Date.now().toString(36), name: "부모", emoji: "🧑‍⚕️", isParent: true, level: "advanced", updated: Date.now() };
+      // id를 고정("parent0")해서 어느 기기에서 이관돼도 같은 부모 프로필로 합쳐지게 함
+      const parent = { id: "parent0", name: "부모", emoji: "🧑‍⚕️", isParent: true, level: "advanced", updated: Date.now() };
       setProfiles([parent]);
       migrateLegacyToProfile(parent.id);
       localStorage.setItem("ec_active", parent.id);

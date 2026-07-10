@@ -265,6 +265,12 @@ main { max-width: 760px; margin: 0 auto; padding: 0 16px 60px; display: grid; ga
 .lt-score { font-size: 1.05rem; color: var(--dim); }
 .lt-level { font-size: 1.6rem; font-weight: 700; }
 
+/* ---- 수업 리포트 열람 ---- */
+.report-list { display: grid; gap: 8px; }
+.report-item { background: var(--card2); border-radius: 10px; padding: 2px 12px; }
+.report-item summary { cursor: pointer; padding: 9px 0; font-size: 0.92rem; }
+.report-item .report { padding: 2px 0 12px; font-size: 0.9rem; }
+
 /* ---- 가족 학습 현황 ---- */
 .family-board { display: grid; gap: 10px; }
 .family-card { background: var(--card2); border-radius: 12px; padding: 12px 14px; display: grid; gap: 8px; }
