@@ -745,11 +745,23 @@ async function syncNow(silent) {
     cloud.profiles = cloud.profiles || {};
     cloud.deletedProfiles = cloud.deletedProfiles || [];
 
-    // v1 → v2 마이그레이션: 기존 단일 사용자 데이터는 부모 프로필 소속으로
+    // v1 → v2 마이그레이션: 루트에 남은 단일 사용자 데이터(구버전 기기가 쓴 것 포함)를
+    // 부모 프로필 버킷에 "병합" — 이미 프로필이 있어도 버리지 않는다
     if (cloud.devices || cloud.shared) {
       const par = getProfiles().find((p) => p.isParent);
-      if (par && !cloud.profiles[par.id]) {
-        cloud.profiles[par.id] = { meta: { ...par }, devices: cloud.devices || {}, shared: cloud.shared || {} };
+      if (par) {
+        const dst = (cloud.profiles[par.id] = cloud.profiles[par.id] || { meta: { ...par }, devices: {}, shared: {} });
+        dst.devices = { ...(cloud.devices || {}), ...(dst.devices || {}) };
+        dst.shared = dst.shared || {};
+        const ssh = cloud.shared || {};
+        dst.shared.wrongbank = mergeById(dst.shared.wrongbank, ssh.wrongbank, (b) => b.id, (x, y) => ({
+          ...x,
+          drill: Math.max(x.drill || 0, y.drill || 0),
+          grad: !!(x.grad || y.grad),
+        })).slice(0, 100);
+        dst.shared.reports = mergeById(dst.shared.reports, ssh.reports, (r) => r.d + "|" + r.topic)
+          .sort((a, b) => b.d.localeCompare(a.d)).slice(0, 20);
+        dst.shared.deleted = [...new Set([...(dst.shared.deleted || []), ...(ssh.deleted || [])])].slice(-200);
       }
       delete cloud.devices;
       delete cloud.shared;
@@ -898,7 +910,7 @@ function scheduleSync() {
   const cfg = JSON.parse(localStorage.getItem("ec_cfg") || "{}");
   if (!cfg.githubToken) return;
   clearTimeout(syncTimer);
-  syncTimer = setTimeout(() => syncNow(true), 8000);
+  syncTimer = setTimeout(() => { syncTimer = null; syncNow(true); }, 8000);
 }
 
 /* ---- 통계 합산 (내 기기 + 다른 기기 버킷) ---- */
@@ -1881,6 +1893,14 @@ function init() {
   $("#btnSync").onclick = () => syncNow(false);
   $("#cfgSyncNow").onclick = () => syncNow(false);
   setTimeout(() => syncNow(true), 2000); // 앱 시작 시 자동 동기화 (토큰 있을 때만)
+  // 앱을 닫거나 백그라운드로 갈 때 대기 중인 동기화 즉시 실행 (8초 디바운스 유실 방지)
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden" && syncTimer) {
+      clearTimeout(syncTimer);
+      syncTimer = null;
+      syncNow(true);
+    }
+  });
 
   // 프로필 오버레이
   renderEmojiRow();
