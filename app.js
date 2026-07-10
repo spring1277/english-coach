@@ -898,11 +898,13 @@ async function syncNow(silent) {
       stEl.textContent = "✅ 동기화 완료 (" + new Date().toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" }) + ")";
       stEl.className = "cfg-status ok";
     }
-    if (btn) btn.textContent = "🔄";
+    if (btn) { btn.textContent = "🔄"; btn.title = "동기화"; }
   } catch (e) {
     if (stEl) { stEl.textContent = "❌ " + e.message; stEl.className = "cfg-status fail"; }
-    if (btn) btn.textContent = "🔄";
-    if (!silent) console.warn("sync failed:", e);
+    // 실패를 헤더에서도 보이게: ⚠️ 표시 + 수동 동기화 실패 시 설정 창을 열어 에러 메시지 표시
+    if (btn) { btn.textContent = "⚠️"; btn.title = "동기화 실패: " + e.message; }
+    if (!silent) $("#modal").classList.remove("hidden");
+    console.warn("sync failed:", e);
   }
 }
 
