@@ -18,7 +18,10 @@
   --display: "Jua", "Pretendard Variable", sans-serif;
 }
 html { scrollbar-color: var(--card2) var(--bg); }
+/* 페이지가 화면 폭을 절대 못 넘게 — 폰에서 "축소해야 맞는" 현상 방지 */
+html, body { overflow-x: clip; max-width: 100%; }
 body {
+  -webkit-text-size-adjust: 100%;
   background:
     radial-gradient(900px 500px at -10% -10%, rgba(139, 124, 255, 0.08), transparent 60%),
     radial-gradient(900px 500px at 110% 110%, rgba(56, 214, 245, 0.07), transparent 60%),
@@ -105,7 +108,7 @@ main { max-width: 760px; margin: 0 auto; padding: 0 16px 64px; display: grid; ga
   border-radius: 10px; padding: 9px 12px; font-size: 0.95rem; resize: vertical; font-family: inherit;
 }
 
-.sentence { font-size: 1.4rem; line-height: 1.5; font-weight: 700; margin: 6px 0 10px; }
+.sentence { font-size: 1.4rem; line-height: 1.5; font-weight: 700; margin: 6px 0 10px; overflow-wrap: break-word; }
 .tip { color: var(--mid); font-size: 0.85rem; margin-bottom: 8px; }
 
 .row { display: flex; gap: 10px; margin-top: 12px; flex-wrap: wrap; justify-content: center; }
@@ -305,7 +308,7 @@ main { max-width: 760px; margin: 0 auto; padding: 0 16px 64px; display: grid; ga
 .transcript .placeholder { color: var(--dim); font-size: 0.9rem; margin: auto; text-align: center; line-height: 1.7; }
 .bubble {
   max-width: 82%; padding: 9px 14px; border-radius: 16px; line-height: 1.5; font-size: 0.97rem;
-  white-space: pre-wrap;
+  white-space: pre-wrap; overflow-wrap: break-word;
 }
 .bubble.teacher { background: var(--card2); align-self: flex-start; border-bottom-left-radius: 4px; }
 .bubble.user {
@@ -378,11 +381,11 @@ main { max-width: 760px; margin: 0 auto; padding: 0 16px 64px; display: grid; ga
 @media (max-width: 480px) {
   /* 헤더 한 줄 유지 */
   header { padding: 12px 14px 8px; }
-  h1 { font-size: 1.12rem; gap: 7px; white-space: nowrap; }
-  .eq { height: 16px; }
-  .header-btns { gap: 4px; }
-  .profile-chip { max-width: 92px; padding: 5px 10px; font-size: 0.8rem; }
-  .icon-btn { font-size: 1.15rem; }
+  h1 { font-size: 1.2rem; gap: 7px; white-space: nowrap; min-width: 0; }
+  .eq { height: 17px; }
+  .header-btns { gap: 4px; flex-shrink: 0; }
+  .profile-chip { max-width: 96px; padding: 5px 10px; font-size: 0.82rem; }
+  .icon-btn { font-size: 1.2rem; }
 
   /* 여백 축소 — 한 화면에 더 많이 */
   main { padding: 0 10px calc(48px + env(safe-area-inset-bottom)); gap: 10px; }
@@ -390,21 +393,25 @@ main { max-width: 760px; margin: 0 auto; padding: 0 16px 64px; display: grid; ga
   .card { padding: 14px; border-radius: 14px; }
   .banner { margin: 0 10px 8px; padding: 9px 14px; font-size: 0.85rem; }
 
-  .mode-btn { font-size: 0.88rem; padding: 10px 4px; }
+  .mode-btn { font-size: 0.95rem; padding: 11px 4px; }
 
   .tabs, .topics { gap: 5px; margin-bottom: 11px; }
-  .tab { padding: 5px 11px; font-size: 0.8rem; }
+  .tab { padding: 6px 12px; font-size: 0.85rem; }
 
-  .sentence { font-size: 1.28rem; }
+  .sentence { font-size: 1.42rem; }
+  .tip { font-size: 0.9rem; }
+  .hint { font-size: 0.86rem; }
 
   /* 버튼을 가로로 꽉 채워 터치 영역 확대 */
-  .row .btn { flex: 1 1 auto; }
+  .row .btn { flex: 1 1 auto; padding: 12px 14px; font-size: 0.95rem; }
   .row .btn.small, .sync-row .btn { flex: 0 0 auto; }
 
   .scores { gap: 7px; }
-  .score-chip { min-width: 74px; padding: 8px 10px; flex: 1 1 30%; }
-  .score-chip .val { font-size: 1.45rem; }
-  .words { font-size: 1.15rem; }
+  .score-chip { min-width: 78px; padding: 9px 10px; flex: 1 1 30%; }
+  .score-chip .val { font-size: 1.6rem; }
+  .words { font-size: 1.25rem; }
+  .rec-meta { font-size: 0.92rem; }
+  .history, .bank { font-size: 0.9rem; }
 
   .dash-tiles { grid-template-columns: repeat(2, 1fr); }
   .ph-val { width: 72px; font-size: 0.75rem; }
