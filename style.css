@@ -374,6 +374,49 @@ main { max-width: 760px; margin: 0 auto; padding: 0 16px 64px; display: grid; ga
 .f-stats { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 0.82rem; color: var(--dim); }
 .f-stats b { color: var(--text); }
 
+/* ---- 모바일 최적화 (폰 화면) ---- */
+@media (max-width: 480px) {
+  /* 헤더 한 줄 유지 */
+  header { padding: 12px 14px 8px; }
+  h1 { font-size: 1.12rem; gap: 7px; white-space: nowrap; }
+  .eq { height: 16px; }
+  .header-btns { gap: 4px; }
+  .profile-chip { max-width: 92px; padding: 5px 10px; font-size: 0.8rem; }
+  .icon-btn { font-size: 1.15rem; }
+
+  /* 여백 축소 — 한 화면에 더 많이 */
+  main { padding: 0 10px calc(48px + env(safe-area-inset-bottom)); gap: 10px; }
+  .view { gap: 10px; }
+  .card { padding: 14px; border-radius: 14px; }
+  .banner { margin: 0 10px 8px; padding: 9px 14px; font-size: 0.85rem; }
+
+  .mode-btn { font-size: 0.88rem; padding: 10px 4px; }
+
+  .tabs, .topics { gap: 5px; margin-bottom: 11px; }
+  .tab { padding: 5px 11px; font-size: 0.8rem; }
+
+  .sentence { font-size: 1.28rem; }
+
+  /* 버튼을 가로로 꽉 채워 터치 영역 확대 */
+  .row .btn { flex: 1 1 auto; }
+  .row .btn.small, .sync-row .btn { flex: 0 0 auto; }
+
+  .scores { gap: 7px; }
+  .score-chip { min-width: 74px; padding: 8px 10px; flex: 1 1 30%; }
+  .score-chip .val { font-size: 1.45rem; }
+  .words { font-size: 1.15rem; }
+
+  .dash-tiles { grid-template-columns: repeat(2, 1fr); }
+  .ph-val { width: 72px; font-size: 0.75rem; }
+
+  .bubble { max-width: 88%; }
+  .transcript { max-height: 52vh; }
+  .modal-body { padding: 18px 16px; width: min(440px, 94vw); }
+
+  /* iOS 포커스 확대 방지 — 입력칸 글자 16px 이상 */
+  .modal-body input, .modal-body select, .custom-box textarea { font-size: 16px; }
+}
+
 /* ---- 접근성 ---- */
 :focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
 @media (prefers-reduced-motion: reduce) {
