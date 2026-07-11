@@ -9,6 +9,8 @@ const state = {
   entered: false,
   category: "daily",
   idx: 0,
+  queue: null,      // 문장 출제 순서 (안 해본 문장 우선)
+  queueKey: "",     // 레벨|카테고리 — 바뀌면 큐 재생성
   customSentence: "",
   recording: false,
   lastBlobUrl: null,
@@ -25,7 +27,7 @@ const MAX_REC_SEC = 20;
    학습 데이터 키는 전부 "키.프로필ID"로 분리 — pk() 참조 */
 const LEVEL_LABELS = { beginner: "🌱 초급", intermediate: "🌿 중급", advanced: "🌳 고급" };
 const PROFILE_EMOJIS = ["🧑‍⚕️", "👩", "👦", "👧", "🧒", "🐯", "🐰", "🦊", "🐼", "⚽", "🎮", "🎀"];
-const DATA_KEYS = ["ec_daily", "ec_phonemes", "ec_history", "ec_sessions", "ec_wrongbank", "ec_deleted", "ec_reports", "ec_remote"];
+const DATA_KEYS = ["ec_daily", "ec_phonemes", "ec_history", "ec_sessions", "ec_wrongbank", "ec_deleted", "ec_reports", "ec_remote", "ec_done"];
 
 function getProfiles() { return JSON.parse(localStorage.getItem("ec_profiles") || "[]"); }
 function setProfiles(ps) { localStorage.setItem("ec_profiles", JSON.stringify(ps)); }
@@ -203,6 +205,21 @@ function renderBank() {
 }
 
 /* ---------- 문장 관리 ---------- */
+/* 연습 완료 기록: pk("ec_done") = { 문장텍스트: 채점 완료 횟수 }
+   출제 큐는 안 해본 문장 먼저, 그다음 연습 횟수가 적은 순 (동률은 원래 순서 유지) */
+function getDone() { return JSON.parse(localStorage.getItem(pk("ec_done")) || "{}"); }
+
+function markDone(text) {
+  const d = getDone();
+  d[text] = (d[text] || 0) + 1;
+  localStorage.setItem(pk("ec_done"), JSON.stringify(d));
+}
+
+function categoryList() {
+  const bank = SENTENCES_BY_LEVEL[levelOf()] || SENTENCES_BY_LEVEL.advanced;
+  return bank[state.category] || bank.daily;
+}
+
 function currentSentence() {
   if (state.category === "custom") return { text: state.customSentence };
   if (state.category === "review") {
@@ -211,9 +228,27 @@ function currentSentence() {
     const it = items[state.idx % items.length];
     return { text: it.right, tip: it.reason, review: it };
   }
-  const bank = SENTENCES_BY_LEVEL[levelOf()] || SENTENCES_BY_LEVEL.advanced;
-  const list = bank[state.category] || bank.daily;
-  return list[state.idx % list.length];
+  const list = categoryList();
+  const qkey = levelOf() + "|" + state.category;
+  if (state.queueKey !== qkey || (state.queue || []).length !== list.length) {
+    const done = getDone();
+    state.queueKey = qkey;
+    state.queue = list.map((_, i) => i)
+      .sort((a, b) => (done[list[a].text] || 0) - (done[list[b].text] || 0));
+  }
+  return list[state.queue[state.idx % list.length]];
+}
+
+function renderPracticeInfo() {
+  const info = $("#practiceInfo");
+  if (state.category === "custom" || state.category === "review") { info.classList.add("hidden"); return; }
+  const done = getDone();
+  const list = categoryList();
+  const doneCount = list.filter((x) => done[x.text]).length;
+  const n = done[currentSentence().text] || 0;
+  info.textContent = (n ? `🔁 ${n}회 연습한 문장` : "✨ 처음 연습하는 문장") +
+    ` · 이 카테고리 ${doneCount}/${list.length} 연습함`;
+  info.classList.remove("hidden");
 }
 
 function renderSentence() {
@@ -229,6 +264,7 @@ function renderSentence() {
   } else {
     $("#sentence").textContent = s.text || "(문장을 입력하세요)";
   }
+  renderPracticeInfo();
   const tipEl = $("#tip");
   if (s.tip) { tipEl.textContent = "💡 " + s.tip; tipEl.classList.remove("hidden"); }
   else tipEl.classList.add("hidden");
@@ -434,6 +470,11 @@ async function stopAndAssess() {
     renderResult(data, text);
     saveHistory(data, text);
     updatePhonemeStats(data);
+    // 연습 완료 기록 — 다음부터 안 해본 문장이 먼저 나오게
+    if (state.category !== "custom" && state.category !== "review") {
+      markDone(text);
+      renderPracticeInfo();
+    }
     if (data.pron != null) bumpDaily({ pron: data.pron });
     scheduleSync();
     // 오답 복습이면 훈련 횟수 반영 (80점 이상 3회 → 졸업)
@@ -883,6 +924,12 @@ async function syncNow(silent) {
       reports.sort((a, b) => b.d.localeCompare(a.d));
       P.shared.reports = reports.slice(0, 20);
       localStorage.setItem(pk("ec_reports"), JSON.stringify(P.shared.reports));
+
+      // 연습 완료 기록 병합 (문장별 횟수, 큰 쪽 승리)
+      const doneMerged = { ...(P.shared.done || {}) };
+      for (const [t, n] of Object.entries(getDone())) doneMerged[t] = Math.max(doneMerged[t] || 0, n);
+      P.shared.done = doneMerged;
+      localStorage.setItem(pk("ec_done"), JSON.stringify(doneMerged));
 
       // 다른 기기 버킷을 로컬에 보관 (통계 합산용)
       const remote = {};
