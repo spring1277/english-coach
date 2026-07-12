@@ -5,7 +5,7 @@
 const $ = (s) => document.querySelector(s);
 
 // index.html의 자산 쿼리(?v=)와 같은 값으로 유지 — 배포 시 함께 올린다
-const APP_VERSION = "20260712e";
+const APP_VERSION = "20260712f";
 
 const state = {
   profileId: "",
@@ -30,7 +30,7 @@ const MAX_REC_SEC = 20;
    학습 데이터 키는 전부 "키.프로필ID"로 분리 — pk() 참조 */
 const LEVEL_LABELS = { beginner: "🌱 초급", intermediate: "🌿 중급", advanced: "🌳 고급" };
 const PROFILE_EMOJIS = ["🧑‍⚕️", "👩", "👦", "👧", "🧒", "🐯", "🐰", "🦊", "🐼", "⚽", "🎮", "🎀"];
-const DATA_KEYS = ["ec_daily", "ec_phonemes", "ec_history", "ec_sessions", "ec_wrongbank", "ec_deleted", "ec_reports", "ec_remote", "ec_done"];
+const DATA_KEYS = ["ec_daily", "ec_phonemes", "ec_history", "ec_sessions", "ec_wrongbank", "ec_deleted", "ec_reports", "ec_remote", "ec_done", "ec_gen"];
 
 function getProfiles() { return JSON.parse(localStorage.getItem("ec_profiles") || "[]"); }
 function setProfiles(ps) { localStorage.setItem("ec_profiles", JSON.stringify(ps)); }
@@ -218,9 +218,14 @@ function markDone(text) {
   localStorage.setItem(pk("ec_done"), JSON.stringify(d));
 }
 
+/* AI 생성 문장: pk("ec_gen") = { "레벨|카테고리": [{text, tip?}, ...] } — 기본 은행 뒤에 이어붙음 */
+function getGen() { return JSON.parse(localStorage.getItem(pk("ec_gen")) || "{}"); }
+
 function categoryList() {
   const bank = SENTENCES_BY_LEVEL[levelOf()] || SENTENCES_BY_LEVEL.advanced;
-  return bank[state.category] || bank.daily;
+  const base = bank[state.category] || bank.daily;
+  const extra = getGen()[levelOf() + "|" + state.category] || [];
+  return extra.length ? [...base, ...extra] : base;
 }
 
 function currentSentence() {
@@ -244,14 +249,107 @@ function currentSentence() {
 
 function renderPracticeInfo() {
   const info = $("#practiceInfo");
-  if (state.category === "custom" || state.category === "review") { info.classList.add("hidden"); return; }
+  const genBtn = $("#btnGenMore");
+  if (state.category === "custom" || state.category === "review") {
+    info.classList.add("hidden");
+    genBtn.classList.add("hidden");
+    return;
+  }
   const done = getDone();
   const list = categoryList();
   const doneCount = list.filter((x) => done[x.text]).length;
   const n = done[currentSentence().text] || 0;
-  info.textContent = (n ? `🔁 ${n}회 연습한 문장` : "✨ 처음 연습하는 문장") +
-    ` · 이 카테고리 ${doneCount}/${list.length} 연습함`;
+  const allDone = doneCount >= list.length;
+  info.textContent = allDone
+    ? `🎉 ${list.length}문장 모두 연습 완료! AI로 새 문장을 만들어보세요`
+    : (n ? `🔁 ${n}회 연습한 문장` : "✨ 처음 연습하는 문장") +
+      ` · 이 카테고리 ${doneCount}/${list.length} 연습함`;
   info.classList.remove("hidden");
+  genBtn.classList.toggle("hidden", !allDone);
+}
+
+/* ---------- AI 새 문장 생성 (Gemini REST, 리포트와 같은 폴백 체인) ---------- */
+async function geminiJson(prompt) {
+  const models = ["gemini-flash-latest", "gemini-2.5-flash", "gemini-2.5-flash-lite"];
+  let lastErr = "생성 실패";
+  for (const m of models) {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent?key=`
+      + encodeURIComponent(state.geminiKey),
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: { responseMimeType: "application/json" },
+        }),
+      }
+    );
+    const body = await res.json();
+    if (res.ok) return body.candidates[0].content.parts.map((p) => p.text || "").join("");
+    lastErr = (body.error && body.error.message) || lastErr;
+    if (res.status !== 429 && res.status !== 503) break; // 과부하만 다음 모델로
+  }
+  throw new Error(lastErr);
+}
+
+async function generateSentences() {
+  if (!state.geminiKey) {
+    setStatus("⚙️ 설정에서 Gemini 키를 입력하면 AI 새 문장을 만들 수 있어요");
+    $("#modal").classList.remove("hidden");
+    return;
+  }
+  const btn = $("#btnGenMore");
+  btn.disabled = true;
+  btn.textContent = "✨ 생성 중...";
+  try {
+    const list = categoryList();
+    const lvKo = {
+      beginner: "초등학생 — 아주 쉬운 단어, 6~9단어 문장",
+      intermediate: "중학생 — 일상 어휘, 8~12단어 문장",
+      advanced: "성인 — 자연스러운 관용 표현 포함, 10~16단어 문장",
+    }[levelOf()];
+    const catDesc = state.category === "drill"
+      ? "특정 발음(음소)을 집중 훈련하는 문장. 각 문장의 tip에 목표 음소와 한국어 발음 요령을 짧게 적으세요."
+      : state.category === "medical"
+      ? "진단검사의학과 의사가 병원·검사실·학회 발표에서 실제로 쓰는 영어 문장. tip은 생략하세요."
+      : "일상 회화에서 실제로 쓰는 자연스러운 문장. tip은 생략하세요.";
+    // 취약 음소 반영 — 약한 소리가 들어간 문장을 우선 생성
+    const weak = Object.entries(aggPhonemes())
+      .map(([p, s]) => ({ p, avg: s.sum / s.cnt, cnt: s.cnt }))
+      .filter((r) => r.cnt >= 2 && r.avg < 85)
+      .sort((a, b) => a.avg - b.avg).slice(0, 5).map((r) => r.p);
+    const prompt = `한국인 영어 학습자(${lvKo})의 발음 연습용 영어 문장 10개를 만들어주세요.
+용도: ${catDesc}
+${weak.length ? `학습자가 약한 발음: /${weak.join("/, /")}/ — 이 소리가 들어간 문장을 우선 포함하세요.` : ""}
+아래 기존 문장과 겹치지 않는 새로운 문장으로:
+${list.map((s) => "- " + s.text).join("\n")}
+
+JSON 배열로만 응답: [{"text": "영어 문장", "tip": "한국어 팁 (drill일 때만)"}]`;
+    const raw = await geminiJson(prompt);
+    let items = JSON.parse(raw);
+    if (!Array.isArray(items)) items = items.sentences || items.items || [];
+    const seen = new Set(list.map((s) => s.text.toLowerCase()));
+    items = items
+      .filter((s) => s && s.text && !seen.has(String(s.text).trim().toLowerCase()))
+      .map((s) => (s.tip ? { text: String(s.text).trim(), tip: String(s.tip) } : { text: String(s.text).trim() }))
+      .slice(0, 10);
+    if (!items.length) throw new Error("새 문장이 만들어지지 않았습니다 — 다시 눌러주세요");
+    const gen = getGen();
+    const gk = levelOf() + "|" + state.category;
+    gen[gk] = [...(gen[gk] || []), ...items].slice(-100);
+    localStorage.setItem(pk("ec_gen"), JSON.stringify(gen));
+    state.queueKey = ""; // 큐 재생성 — 새 문장이 맨 앞으로
+    state.idx = 0;
+    renderSentence();
+    setStatus(`✨ AI가 새 문장 ${items.length}개를 만들었어요!`);
+    scheduleSync();
+  } catch (e) {
+    setStatus("❌ " + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "✨ AI 새 문장";
+  }
 }
 
 function renderSentence() {
@@ -933,6 +1031,15 @@ async function syncNow(silent) {
       for (const [t, n] of Object.entries(getDone())) doneMerged[t] = Math.max(doneMerged[t] || 0, n);
       P.shared.done = doneMerged;
       localStorage.setItem(pk("ec_done"), JSON.stringify(doneMerged));
+
+      // AI 생성 문장 병합 (레벨|카테고리별 문장 텍스트 union, 최근 100개 유지)
+      const genMerged = P.shared.gen || {};
+      for (const [gk, arr] of Object.entries(getGen())) {
+        const have = new Set((genMerged[gk] || []).map((s) => s.text));
+        genMerged[gk] = [...(genMerged[gk] || []), ...(arr || []).filter((s) => s && s.text && !have.has(s.text))].slice(-100);
+      }
+      P.shared.gen = genMerged;
+      localStorage.setItem(pk("ec_gen"), JSON.stringify(genMerged));
 
       // 다른 기기 버킷을 로컬에 보관 (통계 합산용)
       const remote = {};
@@ -1933,6 +2040,7 @@ function enterApp() {
   $("#btnRec").onclick = toggleRecord;
   $("#btnListen").onclick = playModel;
   $("#btnNext").onclick = () => { state.idx += 1; renderSentence(); };
+  $("#btnGenMore").onclick = generateSentences;
   $("#btnRetry").onclick = () => { $("#result").classList.add("hidden"); toggleRecord(); };
   $("#btnPlayback").onclick = () => { if (state.lastBlobUrl) new Audio(state.lastBlobUrl).play(); };
   $("#customApply").onclick = () => {
