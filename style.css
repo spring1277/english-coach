@@ -2,6 +2,8 @@
    딥 인디고 배경 + 바이올렛→시안 그라데이션(소리 스펙트럼)을 핵심 요소에만 사용 */
 * { margin: 0; padding: 0; box-sizing: border-box; }
 :root {
+  --css-v: "20260712g"; /* 진단용 — 설정 모달에 표시 */
+  --mobile: 0;
   --bg: #0b1226;
   --card: #141c33;
   --card2: #1d2745;
@@ -377,8 +379,10 @@ main { max-width: 760px; margin: 0 auto; padding: 0 16px 64px; display: grid; ga
 .f-stats { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 0.82rem; color: var(--dim); }
 .f-stats b { color: var(--text); }
 
-/* ---- 모바일 최적화 (폰 화면) ---- */
-@media (max-width: 480px) {
+/* ---- 모바일 최적화 (폰 화면) ----
+   700px: 큰 폰·화면크기 축소 설정 기기까지 포함 (태블릿 세로 768부터는 데스크톱 레이아웃) */
+@media (max-width: 700px) {
+  :root { --mobile: 1; }
   /* 헤더 한 줄 유지 */
   header { padding: 12px 14px 8px; }
   h1 { font-size: 1.2rem; gap: 7px; white-space: nowrap; min-width: 0; }

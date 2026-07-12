@@ -5,7 +5,7 @@
 const $ = (s) => document.querySelector(s);
 
 // index.html의 자산 쿼리(?v=)와 같은 값으로 유지 — 배포 시 함께 올린다
-const APP_VERSION = "20260712f";
+const APP_VERSION = "20260712g";
 
 const state = {
   profileId: "",
@@ -2081,7 +2081,12 @@ async function checkAppUpdate() {
 
 function init() {
   loadConfig();
-  $("#appVersion").textContent = "앱 버전 " + APP_VERSION;
+  // 진단 정보 — 화면 비율 문제 원격 확인용 (CSS 버전·뷰포트·모바일 레이아웃 적용 여부)
+  const rootStyle = getComputedStyle(document.documentElement);
+  const cssV = (rootStyle.getPropertyValue("--css-v") || "").replace(/["' ]/g, "") || "구버전";
+  const mobileOn = rootStyle.getPropertyValue("--mobile").trim() === "1";
+  $("#appVersion").textContent =
+    `앱 ${APP_VERSION} · CSS ${cssV} · 화면 ${window.innerWidth}×${window.innerHeight} · 모바일 레이아웃 ${mobileOn ? "ON" : "OFF"}`;
   setTimeout(checkAppUpdate, 3000);
 
   // 설정 모달 (프로필 선택 전에도 동작 — 새 기기에서 토큰 먼저 입력 가능)
