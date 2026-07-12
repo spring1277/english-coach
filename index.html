@@ -11,7 +11,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Jua&display=swap">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="style.css?v=20260712e">
 <script src="https://cdn.jsdelivr.net/npm/microsoft-cognitiveservices-speech-sdk@latest/distrib/browser/microsoft.cognitiveservices.speech.sdk.bundle-min.js"></script>
 </head>
 <body>
@@ -271,11 +271,12 @@
       <button id="cfgSave" class="btn">저장</button>
       <button id="cfgClose" class="btn ghost">닫기</button>
     </div>
+    <p class="hint" id="appVersion"></p>
   </div>
 </div>
 
-<script src="sentences.js"></script>
-<script src="app.js"></script>
+<script src="sentences.js?v=20260712e"></script>
+<script src="app.js?v=20260712e"></script>
 <script>
   // PWA 서비스워커 (https에서만 — 로컬 개발 시 캐시 꼬임 방지)
   if ("serviceWorker" in navigator && location.protocol === "https:") {

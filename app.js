@@ -4,6 +4,9 @@
    키 저장: localStorage (기기별) — 로컬 서버가 있으면 최초 1회 이관 */
 const $ = (s) => document.querySelector(s);
 
+// index.html의 자산 쿼리(?v=)와 같은 값으로 유지 — 배포 시 함께 올린다
+const APP_VERSION = "20260712e";
+
 const state = {
   profileId: "",
   entered: false,
@@ -1951,8 +1954,27 @@ function enterApp() {
   if (p && !p.level) setTimeout(openLevelTest, 400);
 }
 
+/* 서버에 새 버전이 올라왔는데 이 클라이언트가 구버전이면
+   서비스워커·캐시를 비우고 1회 재로드 — 폰 홈화면 앱이 구버전에 갇히는 것 방지 */
+async function checkAppUpdate() {
+  try {
+    const res = await fetch("index.html", { cache: "no-cache" });
+    if (!res.ok) return;
+    const m = (await res.text()).match(/app\.js\?v=([\w.-]+)/);
+    if (!m || m[1] === APP_VERSION || sessionStorage.getItem("ec_reloaded")) return;
+    sessionStorage.setItem("ec_reloaded", "1");
+    if (navigator.serviceWorker) {
+      for (const r of await navigator.serviceWorker.getRegistrations()) await r.update();
+    }
+    if (window.caches) for (const k of await caches.keys()) await caches.delete(k);
+    location.reload();
+  } catch {}
+}
+
 function init() {
   loadConfig();
+  $("#appVersion").textContent = "앱 버전 " + APP_VERSION;
+  setTimeout(checkAppUpdate, 3000);
 
   // 설정 모달 (프로필 선택 전에도 동작 — 새 기기에서 토큰 먼저 입력 가능)
   $("#btnSettings").onclick = () => $("#modal").classList.remove("hidden");
