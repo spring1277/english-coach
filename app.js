@@ -5,7 +5,7 @@
 const $ = (s) => document.querySelector(s);
 
 // index.html의 자산 쿼리(?v=)와 같은 값으로 유지 — 배포 시 함께 올린다
-const APP_VERSION = "20260712g";
+const APP_VERSION = "20260713h";
 
 const state = {
   profileId: "",
@@ -2081,12 +2081,18 @@ async function checkAppUpdate() {
 
 function init() {
   loadConfig();
-  // 진단 정보 — 화면 비율 문제 원격 확인용 (CSS 버전·뷰포트·모바일 레이아웃 적용 여부)
-  const rootStyle = getComputedStyle(document.documentElement);
-  const cssV = (rootStyle.getPropertyValue("--css-v") || "").replace(/["' ]/g, "") || "구버전";
-  const mobileOn = rootStyle.getPropertyValue("--mobile").trim() === "1";
-  $("#appVersion").textContent =
-    `앱 ${APP_VERSION} · CSS ${cssV} · 화면 ${window.innerWidth}×${window.innerHeight} · 모바일 레이아웃 ${mobileOn ? "ON" : "OFF"}`;
+  // 진단 정보 — 화면 비율 문제 원격 확인용 (CSS 버전·뷰포트·모바일 레이아웃·문서 폭)
+  const renderDiag = () => {
+    const rootStyle = getComputedStyle(document.documentElement);
+    const cssV = (rootStyle.getPropertyValue("--css-v") || "").replace(/["' ]/g, "") || "구버전";
+    const mobileOn = rootStyle.getPropertyValue("--mobile").trim() === "1";
+    // 문서 폭 > 화면 폭이면 어떤 요소가 레이아웃을 밀어낸 것 (iOS 잘림 증상)
+    $("#appVersion").textContent =
+      `앱 ${APP_VERSION} · CSS ${cssV} · 화면 ${window.innerWidth}×${window.innerHeight}` +
+      ` · 문서 ${document.documentElement.scrollWidth}px · 모바일 레이아웃 ${mobileOn ? "ON" : "OFF"}`;
+  };
+  renderDiag();
+  setTimeout(renderDiag, 2500); // 레이아웃 확정 후 재측정
   setTimeout(checkAppUpdate, 3000);
 
   // 설정 모달 (프로필 선택 전에도 동작 — 새 기기에서 토큰 먼저 입력 가능)

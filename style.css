@@ -2,7 +2,7 @@
    딥 인디고 배경 + 바이올렛→시안 그라데이션(소리 스펙트럼)을 핵심 요소에만 사용 */
 * { margin: 0; padding: 0; box-sizing: border-box; }
 :root {
-  --css-v: "20260712g"; /* 진단용 — 설정 모달에 표시 */
+  --css-v: "20260713h"; /* 진단용 — 설정 모달에 표시 */
   --mobile: 0;
   --bg: #0b1226;
   --card: #141c33;
@@ -58,11 +58,14 @@ h2 { font-size: 1rem; font-weight: 700; margin-bottom: 12px; }
 .eq i:nth-child(5) { height: 45%; animation-delay: 0.6s; }
 @keyframes eqBounce { 0%, 100% { transform: scaleY(0.55); } 50% { transform: scaleY(1); } }
 
-main { max-width: 760px; margin: 0 auto; padding: 0 16px 64px; display: grid; gap: 14px; }
+/* grid-template-columns: minmax(0,1fr) — 자식의 최소 내용 폭이 커도(긴 문장 등)
+   카드가 화면 폭을 절대 못 넘게 강제 (iOS에서 전체 레이아웃이 옆으로 커지는 것 방지) */
+main { max-width: 760px; margin: 0 auto; padding: 0 16px 64px; display: grid; gap: 14px; grid-template-columns: minmax(0, 1fr); }
 
 .card {
   background: var(--card); border: 1px solid rgba(139, 124, 255, 0.08);
   border-radius: var(--radius); padding: 18px;
+  min-width: 0; max-width: 100%;
 }
 .card.center { text-align: center; }
 
@@ -76,7 +79,7 @@ main { max-width: 760px; margin: 0 auto; padding: 0 16px 64px; display: grid; ga
 /* ---- 모드 내비게이션 ---- */
 .mode-nav { display: flex; gap: 8px; }
 .mode-btn {
-  flex: 1; padding: 12px 6px; border-radius: var(--radius); cursor: pointer;
+  flex: 1; min-width: 0; padding: 12px 6px; border-radius: var(--radius); cursor: pointer;
   background: var(--card); color: var(--dim);
   border: 1px solid rgba(139, 124, 255, 0.08);
   font-size: 0.98rem; font-family: var(--display); font-weight: 400;
@@ -92,7 +95,7 @@ main { max-width: 760px; margin: 0 auto; padding: 0 16px 64px; display: grid; ga
   border: 1px solid transparent;
   box-shadow: 0 4px 20px rgba(139, 124, 255, 0.18);
 }
-.view { display: grid; gap: 14px; }
+.view { display: grid; gap: 14px; grid-template-columns: minmax(0, 1fr); }
 
 /* ---- 탭 (문장 카테고리 / 회화 토픽) ---- */
 .tabs, .topics { display: flex; gap: 6px; margin-bottom: 14px; flex-wrap: wrap; }
@@ -188,7 +191,7 @@ main { max-width: 760px; margin: 0 auto; padding: 0 16px 64px; display: grid; ga
   animation: popIn 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) 0.3s backwards;
 }
 
-.words { font-size: 1.3rem; line-height: 2; text-align: center; }
+.words { font-size: 1.3rem; line-height: 2; text-align: center; overflow-wrap: break-word; min-width: 0; }
 .w { cursor: pointer; padding: 2px 4px; border-radius: 6px; border-bottom: 3px solid transparent; }
 .w.good { border-bottom-color: var(--good); }
 .w.mid  { border-bottom-color: var(--mid); background: rgba(255, 200, 87, 0.08); }
